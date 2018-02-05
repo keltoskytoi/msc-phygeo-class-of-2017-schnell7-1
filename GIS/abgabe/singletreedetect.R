@@ -1,4 +1,4 @@
-#' @title Single tree detection using LAS files
+#' @title Single tree detection using LAS files 
 #' 
 #' @describtion this function allows you to detect singele trees using LiDar technology. You need some kind of normalized canopy height model "CHM" as well as .las files first \cr 
 #' the output is 1 ESRI shapefile per "treeheight" for method 'watershed' and all combinations bewteen "treeheight" and "crowndm" for method 'dalponte2016', as well as one .csv file summarizing your results per run \cr 

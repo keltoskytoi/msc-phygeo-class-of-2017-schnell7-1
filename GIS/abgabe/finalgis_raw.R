@@ -197,7 +197,7 @@ runSingleTreeDetectionLidR = function(chm = chm, las = las, output = output,
                                   treeheight = treehight, 
                                   crowndm = crowndm, 
                                   overwrite = overwrite){
-methvar = c(1:2)
+methvar = c(1:2) 
 for (l in methvar){
   if (l == 1){
     SensAnalysisFiles_d = SensitivityAnalysis(chm = chm, las = las, output = output, 
