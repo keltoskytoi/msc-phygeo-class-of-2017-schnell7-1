@@ -1,4 +1,4 @@
-#' @title Single tree detection using LAS files 
+#' @title Single tree detection using LAS files (algorithm based on package LidR)
 #' 
 #' @describtion this function allows you to detect singele trees using LiDar technology. You need some kind of normalized canopy height model "CHM" as well as .las files first \cr 
 #' the output is 1 ESRI shapefile per "treeheight" for method 'watershed' and all combinations bewteen "treeheight" and "crowndm" for method 'dalponte2016', as well as one .csv file summarizing your results per run \cr 
@@ -15,12 +15,12 @@
 #'install.packages("EBImage")"
 #'} \cr
 #'! make sure to save the produced .csv file after each run !
-#' @param chm is the normalized canopy heigt model 
+#' @param chm is the normalized canopy height model 
 #' @param las is the underlaying .las file
 #' @param output is the path where you want to save the results
 #' @param treeheight is the minimum height an object will be considered as 'treecrown' [m] (try different values see example)
 #' @param crowndm is the crowndiameter [m] (try different values see example); preset is 'NULL'
-#' @param overwrite TRUE or FALSE. Do you want to override existing outputs?; preset is 'TRUE'
+#' @param overwrite TRUE or FALSE. Do you want to overwrite existing outputs?; preset is 'TRUE'
 #' 
 #' @export runsingletreedetectlidr
 #' @examples saves and overwrites (if existing) the results in './temp/' with different iterations of treeheight (bewteen 5 and 10m, by 1m stpes) and different crowndiameters (5,7,10,15,20,25) \cr
@@ -44,13 +44,14 @@ require(rgdal)
 require(EBImage)
 
 
-#define function1 SensitivityAnalysis which is part of the final function
+#define function1 SensitivityAnalysis which is part of the final function (coming next)
 SensitivityAnalysis = function(chm, las,
                                output,
                                treeheight,
                                crowndm = NULL,
-                               overwrite = TRUE) {
-
+                               overwrite = TRUE,
+                               method = method) {
+  
   
   if (method == "dalponte2016"){
     # 1. way of segmentation: dalponte
@@ -66,18 +67,18 @@ SensitivityAnalysis = function(chm, las,
         crown.shp <- raster::rasterToPolygons(extra$Crown, dissolve = TRUE)
         treenumber<-nrow(crown.shp@data)
         
-        rgdal::writeOGR(crown.shp, paste0(output, "crown", i,"_", j,"_", method, ".shp"), 
-                 paste0(basename(paste0(output, "crown", i,"_", j,"_", method, ".shp"))), 
-                 driver = "ESRI Shapefile", overwrite = overwrite)
+        rgdal::writeOGR(crown.shp, paste0(output, "crown_th", i,"_cd", j,"_", method, ".shp"), 
+                        paste0(basename(paste0(output, "crown_th", i,"_cd", j,"_", method, ".shp"))), 
+                        driver = "ESRI Shapefile", overwrite = overwrite)
         Maxima.shp <- raster::rasterToPolygons(extra$Maxima, dissolve = TRUE)
         treenumber<-nrow(Maxima.shp@data)
         
-        rgdal::writeOGR(Maxima.shp, paste0(output, "Maxima_and_crown", i,"_", j,"_", method,".shp"), 
-                 paste0(basename(paste0(output, "Maxima", i,"_", j,"_", method, ".shp"))), 
-                 driver = "ESRI Shapefile", overwrite = overwrite)
+        rgdal::writeOGR(Maxima.shp, paste0(output, "Maxima_th", i,"_cd", j,"_", method,".shp"), 
+                        paste0(basename(paste0(output, "Maxima_th", i,"_cd", j,"_", method, ".shp"))), 
+                        driver = "ESRI Shapefile", overwrite = overwrite)
         print("dalponte2016")
         x = x+1
-        SensAnalysisFiles[x,1] = paste0("Maxima_and_crown", i,"_", j,"_", method, ".shp")
+        SensAnalysisFiles[x,1] = paste0("Maxima_and_crown_th", i,"_cd", j,"_", method, ".shp")
         SensAnalysisFiles[x,2] = method
         SensAnalysisFiles[x,3] = i
         SensAnalysisFiles[x,4] = j
@@ -99,12 +100,12 @@ SensitivityAnalysis = function(chm, las,
       extra.shp <- raster::rasterToPolygons(extra, dissolve = TRUE)
       treenumber<-nrow(extra.shp@data)
       
-      raster::writeOGR(extra.shp, paste0(output, "extra", i,"_", method, ".shp"), 
-               paste0(basename(paste0(output, "extra", i,"_", method, ".shp"))), 
-               driver = "ESRI Shapefile", overwrite = overwrite)
+      rgdal::writeOGR(extra.shp, paste0(output, "crown_th", i,"_", method, ".shp"), 
+                      paste0(basename(paste0(output, "crown_th", i,"_", method, ".shp"))), 
+                      driver = "ESRI Shapefile", overwrite = overwrite)
       print("watershed")
       x = x+1
-      SensAnalysisFiles[x,1] = paste0("extra", i,"_", method, ".shp")
+      SensAnalysisFiles[x,1] = paste0("crown_th", i,"_", method, ".shp")
       SensAnalysisFiles[x,2] = method
       SensAnalysisFiles[x,3] = i
       SensAnalysisFiles[x,5] = t2-t1
@@ -119,7 +120,7 @@ SensitivityAnalysis = function(chm, las,
 #to run function1 SensitivityAnalysis (both methods: dalponte2016&watershed)
 
 runSingleTreeDetectionLidR = function(chm, las, output, 
-                                      treehight, 
+                                      treeheight, 
                                       crowndm = NULL, 
                                       overwrite = TRUE){
   methvar = c(1:2)
@@ -139,6 +140,6 @@ runSingleTreeDetectionLidR = function(chm, las, output,
   #save files and output table
   sa_files<- rbind(SensAnalysisFiles_d, SensAnalysisFiles_w)
   colnames(sa_files)<- c("filename", "method", "mintreeheight", "crowndiameter", "time", "treenumber")
-  write.table(sa_files, file = paste0(temp, Sys.Date(), "SensAnalysisFiles_out.csv"), sep =",", overwrite=overwrite)
+  write.table(sa_files, file = paste0(temp, Sys.Date(), "SensAnalysisFiles_out.csv"), sep =",")
 }
 
