@@ -1,0 +1,579 @@
+---
+title: "rs_ws_10_1"
+author: "Laura Giese, Johannes Schnell, Alena Schmid"
+date: "9 Februar 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, echo = T, eval = FALSE}
+install.packages("gpmm", repos = "C:/Users/Laura/Documents/R/win-library/")
+library(caret)
+library(raster)
+library(rgdal)
+library(maptools)
+library(png)
+install.packages("C:/Users/Laura/Documents/R/win-library/3.4/gpmm", repos = NULL, type="source")
+library(gpm)
+library(randomForest)
+
+
+filepath_base <- "C:/Users/Laura/Documents/Uni/Fernerkundung/Daten/w091/"
+path_data <- paste0(filepath_base, "input/")
+path_csv <- paste0(path_data, "csv/")
+path_rdata <- paste0(path_data, "rdata/")
+path_scripts <- paste0(filepath_base)
+path_temp <- paste0(filepath_base, "temp/")
+path_out <- paste0(filepath_base, "output/")
+
+#functions
+
+#rs-ws-03-2
+# MOC - Remote Sensing (T. Nauss, C. Reudenbach)
+# 
+#' Compute Kappa based on contingency table
+#' 
+#' @description
+#' Compute Kappa index.
+#'
+#' @param ctable Contingency table
+#'
+#' @return Kappa index.
+#'
+compKappa <- function(ctable){
+  ctable <- ctable/sum(ctable)
+  categories <- nrow(ctable)
+  
+  # Fraction of agreement
+  pagrm <- 0
+  for(i in seq(categories)){
+    pagrm <- pagrm + ctable[i,i]
+  }
+  
+  # Expected fraction of agreement subject to the observed distribution
+  pexpct <- 0
+  for(i in seq(categories)){
+    pexpct <- pexpct + sum(ctable[i,]) * sum(ctable[,i])
+  }
+  
+  # Kappa index
+  kappa <- (pagrm - pexpct)/(1 - pexpct)
+  
+  return(kappa)
+}
+
+# rs-ws-09-2
+# MOC - Data Analysis (T. Nauss, C. Reudenbach)
+
+# ---------------------------------------------------#
+# Load raster and trainingsshape and extract polygone fields ---------------------------
+
+muf_lc_ta_segm_fields_nincl <- readOGR("C:/Users/Laura/Documents/Uni/Fernerkundung/Daten/w091/input/rdata/lcc_training_areas_20180126.shp")
+muf_lc_ta_segm_fields_nincl$Type
+info<-data.frame(muf_lc_ta_segm_fields_nincl$LN, muf_lc_ta_segm_fields_nincl$Type)
+Muf_files <- stack( "C:/Users/Laura/Documents/Uni/Fernerkundung/Daten/w091/input/rdata/geonode_ortho_muf_rgb_idx_pca_scaled.tif")
+
+x <- list.files(paste0(path_rdata), pattern = ".tif$", full.names = TRUE, recursive = TRUE)
+muf = stack(x)
+plot(muf)
+
+muf@crs@projargs<- c("+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0+units=m +no_defs")
+
+re <- setValues(muf[[1]], seq(ncell(muf[[1]])))
+re_fields_nincl <- extract(re, muf_lc_ta_segm_fields_nincl)
+
+muf_lc_ta_segm_fields_nincl_df <- 
+  lapply(seq(length(muf_lc_ta_segm_fields_nincl)), function(i){
+    data.frame(LCC_ID = muf_lc_ta_segm_fields_nincl@data$id[i],
+               LCC_NAME = muf_lc_ta_segm_fields_nincl@data$LN[i],
+               PIXEL = re_fields_nincl[[i]])
+  })
+muf_lc_ta_segm_fields_nincl_df <- do.call("rbind", muf_lc_ta_segm_fields_nincl_df)
+saveRDS(muf_lc_ta_segm_fields_nincl_df, 
+        file = paste0(path_data, "muf_lc_ta_segm_fields_nincl_df.rds"))
+
+raVals <- 
+  summary(muf_lc_ta_segm_fields_nincl_df)
+
+muf_lc_ta_segm_df <- rbind(muf_lc_ta_segm_fields_nincl_df)
+
+# Extract raster information
+names_muf <- names(muf)
+muf_lc_ta_segm_traindata <- muf_lc_ta_segm_df
+for(i in seq(nlayers(muf))){
+  muf_lc_ta_segm_traindata <- cbind(muf_lc_ta_segm_traindata, 
+                                    muf[[i]][muf_lc_ta_segm_traindata$PIXEL])
+  colnames(muf_lc_ta_segm_traindata)[i+3] <- names_muf[i]
+}
+
+saveRDS(muf_lc_ta_segm_traindata, file = paste0(path_data,"muf_lc_ta_segm_traindata.rds"))
+
+summary(muf_lc_ta_segm_traindata)
+muf_lc_ta_segm_traindata
+
+writeOGR(muf_lc_ta_segm_traindata, paste0(path_temp, "muf_lc_ta_segm_traindata_1.shp"), 
+         driver = "ESRI Shapefile", overwrite = T)
+write.table(muf_lc_ta_segm_traindata, paste0(path_temp, "muf_lc_ta_segm_traindata_1.txt"))
+write.table(muf_lc_ta_segm_fields_nincl_df, paste0(path_temp, "muf_lc_ta_segm_fields_nincl_df.txt"))
+
+
+#--------------------------------model training image classification--------------------------#
+obsv <- readRDS(file = paste0(path_data, "muf_lc_ta_segm_traindata.rds"))
+obsv <- obsv[which(obsv$LCC_NAME %in% names(table(obsv$LCC_NAME)[table(obsv$LCC_NAME) > 100])),]
+obsv=obsv[-1]
+
+obsv <- obsv[complete.cases(obsv),]
+
+obsv$LCC_NAME <- as.factor(obsv$LCC_NAME)
+
+#meta data
+col_selector <- which(names(obsv) == "LCC_NAME")
+col_meta <- NULL
+col_lc <- which(names(obsv) == "LCC_NAME")
+col_precitors <- seq(which(names(obsv)=="geonode_ortho_muf_rgb_idx_pca_scaled.1"),
+                     which(names(obsv)=="geonode_ortho_muf_rgb_idx_pca_scaled.7"))
+                    
+
+meta <- createGPMMeta(obsv, type = "input",
+                      selector = col_selector, 
+                      response = col_lc, 
+                      predictor = col_precitors, 
+                      meta = col_meta)
+
+#run AAAgpmClasses
+obsv <- gpm(obsv, meta, scale = FALSE)
+
+#highly correlating? nicht bei Erklärung, da erklärende Variable rausfliegen könnte
+#clean_pred <- cleanPredictors(x = obsv, nzv = TRUE, 
+#                           highcor = TRUE, cutoff = 0.70)
+
+#test&training, durschmischung des vector, struktur des objekts geschuldet
+obsv <- resamplingsByVariable(x = obsv,
+                              use_selector = FALSE,
+                              resample = 1, 
+                              grabs = 50)
+
+# Split resamples into training and testing samples
+p_val = 0.10
+obsv <- splitMultResp(x = obsv, 
+                      p = p_val, 
+                      use_selector = FALSE)
+
+#trainModel
+memory.limit(6000000)
+install.packages("doParallel")
+library(doParallel)
+cl = makeCluster(detectCores()-1)
+registerDoParallel(cl)
+
+obsv <- trainModel(x = obsv,
+                   n_var = NULL, 
+                   mthd = "rf",
+                   mode = "rfe",
+                   seed_nbr = 1, 
+                   cv_nbr = 5,
+                   var_selection = "indv", 
+                   filepath_tmp = NULL)
+
+
+
+#tstat <- compContTests(obsv@model$rf_rfe)
+#tstat[[1]]["Kappa_mean"]
+
+obsv@model$rf_rfe[[1]][[1]]$testing$PREDICTED
+obsv@model$rf_rfe[[1]][[1]]$testing$RESPONSE
+
+test<-raster(obsv@model$rf_rfe[[1]][[1]])
+obsv@model$rf_rfe[[1]][[1]]$model$pred
+
+plot(obsv@model$rf_rfe)
+
+cont_table1 <- ftable(obsv@model$rf_rfe[[1]][[1]]$testing$PREDICTED, 
+                     obsv@model$rf_rfe[[1]][[1]]$testing$RESPONSE)
+levels(obsv@model$rf_rfe[[1]][[10]]$testing$RESPONSE)
+kappa=compKappa(cont_table1)
+obsv_1=obsv
+obsv = obsv_10resam
+
+
+
+saveRDS(obsv, file=paste0(path_out, "TrainModel_neu.rds"))
+obsv<-readRDS(paste0(path_out, "TrainModel_neu.rds"))
+obsv@model$rf_rfe[[1]][[8]]$model$fit$results$Kappa
+#best kappa rf_rfe[[1]][[10]]
+
+var_imp <- compVarImp(obsv@model$rf_rfe, scale = FALSE)
+var_imp_scale <- compVarImp(obsv@model$rf_rfe, scale = TRUE)
+
+plotVarImp(var_imp)
+bestmodel=which(df_kappa[,1]==max(df_kappa))
+
+plotVarImpHeatmap(var_imp_scale, xlab = "Species", ylab = "Band")
+
+#Predicition------------------------------------------------
+Muf_files <- stack( "C:/Users/Laura/Documents/Uni/Fernerkundung/Daten/w091/input/rdata/geonode_ortho_muf_rgb_idx_pca_scaled.tif")
+
+x <- list.files(paste0(path_rdata), pattern = ".tif$", full.names = TRUE, recursive = TRUE)
+muf = stack(x)
+plot(muf)
+
+
+muf_df <- getValues(muf)
+
+
+gpm_muf_lc_ta_segm_rf_predict <- predict(obsv@model$rf_rfe[[1]][[10]]$model$fit, newdata = muf_df,
+                                         na.action = na.pass)
+
+muf_lcc_prediction <- setValues(muf[[1]], as.numeric(as.character(gpm_muf_lc_ta_segm_rf_predict)))
+
+
+writeRaster(muf_lcc_prediction, paste0(path_out, "muf_lcc_prediction.tif"), overwrite = TRUE)
+
+# Read land-cover prediction data and segments ------------------------------------------
+lccpred <- raster(paste0(path_out,"muf_lcc_prediction.tif"))
+
+memory.limit(5000000)
+lccseg <- readOGR(paste0(path_data, "vector.shp"))
+lccseg
+
+#change projection
+projection(lccpred) <- CRS("+init=epsg:25832")
+projection(lccseg)<- CRS("+init=epsg:25832")
+
+re <- setValues(lccpred, seq(ncell(lccpred)))
+re_extract <- extract(re, lccseg)
+
+#save
+saveRDS(re_extract, paste0(path_out, "re_extract.rds"))
+
+
+for(i in re_extract){
+  lccpred[i] <- modal(lccpred[i])
+}
+
+lccpred
+lccpred <- writeRaster(lccpred, paste0(path_out, "lcc_predict_segment_mod.tif"))
+
+
+#get best model via calculating kappa
+df_kappa=matrix(NA, 10,1)
+for (i in seq(1:10)){ 
+  df_kappa[i,1]=compKappa(ftable(obsv@model$rf_rfe[[1]][[i]]$testing$PREDICTED, 
+                                 obsv@model$rf_rfe[[1]][[i]]$testing$RESPONSE, predlcc))
+}
+
+#trying to get max class count per segment
+count <- table(lccpred)
+max<-max(count)
+
+#pseudocode
+#for values per seg do overwrite with class value wich was max(counted) in segment 
+lccpred[seg(i)]<-whichclass(count[] == max(count))
+
+uniq=unique(obsv_10resam@data$input$LCC_ID)
+
+#trying to get trainModel output as raster
+#doesnt´t work
+ras=as.raster(obsv_10resam@model$rf_rfe[[1]][[7]]$testing$PREDICTED)
+writeOGR(obsv_10resam@model$rf_rfe[[1]][[7]], dsn = paste0(path_out, "predict.shp"), driver = "ESRI Shapefile", layer = "pred")
+ras=obsv_10resam@model$rf_rfe[[1]][[7]]$testing$PREDICTED
+ras
+ratify(ras)
+is.raster(ras)
+df_ras = as.data.frame(ras)
+rgb_cal = raster(paste0("C:/Users/Laura/Documents/Uni/Fernerkundung/ergebnisse/rgbRaster_cal.tif"))
+r <- raster(ncol=12265, nrow=14795)
+extent(r)<-c(475927, 478886, 5630630, 5633083)
+res(r)<-0.2
+for (i in (seq(length(ras)))){
+  r[i]=ras[i]
+  }
+install.packages("gpmm", repos = "C:/Users/Laura/Documents/R/win-library/")
+library(caret)
+library(raster)
+library(rgdal)
+library(maptools)
+library(png)
+install.packages("C:/Users/Laura/Documents/R/win-library/3.4/gpmm", repos = NULL, type="source")
+library(gpm)
+library(randomForest)
+
+
+filepath_base <- "C:/Users/Laura/Documents/Uni/Fernerkundung/Daten/w091/"
+path_data <- paste0(filepath_base, "input/")
+path_csv <- paste0(path_data, "csv/")
+path_rdata <- paste0(path_data, "rdata/")
+path_scripts <- paste0(filepath_base)
+path_temp <- paste0(filepath_base, "temp/")
+path_out <- paste0(filepath_base, "output/")
+
+# rs-ws-09-2
+# MOC - Data Analysis (T. Nauss, C. Reudenbach)
+
+# --------------------prepare data-------------------------------#
+# Load raster and trainingsshape and extract polygone fields ---------------------------
+
+muf_lc_ta_segm_fields_nincl <- readOGR("C:/Users/Laura/Documents/Uni/Fernerkundung/Daten/w091/input/rdata/lcc_training_areas_20180126.shp")
+muf_lc_ta_segm_fields_nincl$Type
+info<-data.frame(muf_lc_ta_segm_fields_nincl$LN, muf_lc_ta_segm_fields_nincl$Type)
+Muf_files <- stack( "C:/Users/Laura/Documents/Uni/Fernerkundung/Daten/w091/input/rdata/geonode_ortho_muf_rgb_idx_pca_scaled.tif")
+
+x <- list.files(paste0(path_rdata), pattern = ".tif$", full.names = TRUE, recursive = TRUE)
+muf = stack(x)
+plot(muf)
+
+muf@crs@projargs<- c("+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0+units=m +no_defs")
+
+re <- setValues(muf[[1]], seq(ncell(muf[[1]])))
+re_fields_nincl <- extract(re, muf_lc_ta_segm_fields_nincl)
+
+muf_lc_ta_segm_fields_nincl_df <- 
+  lapply(seq(length(muf_lc_ta_segm_fields_nincl)), function(i){
+    data.frame(LCC_ID = muf_lc_ta_segm_fields_nincl@data$id[i],
+               LCC_NAME = muf_lc_ta_segm_fields_nincl@data$LN[i],
+               PIXEL = re_fields_nincl[[i]])
+  })
+muf_lc_ta_segm_fields_nincl_df <- do.call("rbind", muf_lc_ta_segm_fields_nincl_df)
+saveRDS(muf_lc_ta_segm_fields_nincl_df, 
+        file = paste0(path_data, "muf_lc_ta_segm_fields_nincl_df.rds"))
+
+raVals <- 
+  summary(muf_lc_ta_segm_fields_nincl_df)
+
+muf_lc_ta_segm_df <- rbind(muf_lc_ta_segm_fields_nincl_df)
+
+# Extract raster information
+names_muf <- names(muf)
+muf_lc_ta_segm_traindata <- muf_lc_ta_segm_df
+for(i in seq(nlayers(muf))){
+  muf_lc_ta_segm_traindata <- cbind(muf_lc_ta_segm_traindata, 
+                                    muf[[i]][muf_lc_ta_segm_traindata$PIXEL])
+  colnames(muf_lc_ta_segm_traindata)[i+3] <- names_muf[i]
+}
+
+saveRDS(muf_lc_ta_segm_traindata, file = paste0(path_data,"muf_lc_ta_segm_traindata.rds"))
+
+summary(muf_lc_ta_segm_traindata)
+muf_lc_ta_segm_traindata
+
+writeOGR(muf_lc_ta_segm_traindata, paste0(path_temp, "muf_lc_ta_segm_traindata_1.shp"), 
+         driver = "ESRI Shapefile", overwrite = T)
+write.table(muf_lc_ta_segm_traindata, paste0(path_temp, "muf_lc_ta_segm_traindata_1.txt"))
+write.table(muf_lc_ta_segm_fields_nincl_df, paste0(path_temp, "muf_lc_ta_segm_fields_nincl_df.txt"))
+
+
+#-------------------------------Model Training for ImageClassification------------------#
+obsv <- readRDS(file = paste0(path_data, "muf_lc_ta_segm_traindata.rds"))
+obsv <- obsv[which(obsv$LCC_NAME %in% names(table(obsv$LCC_NAME)[table(obsv$LCC_NAME) > 100])),]
+obsv=obsv[-1]
+
+obsv <- obsv[complete.cases(obsv),]
+
+obsv$LCC_NAME <- as.factor(obsv$LCC_NAME)
+
+#meta data
+col_selector <- which(names(obsv) == "LCC_NAME")
+col_meta <- NULL
+col_lc <- which(names(obsv) == "LCC_NAME")
+col_precitors <- seq(which(names(obsv)=="geonode_ortho_muf_rgb_idx_pca_scaled.1"),
+                     which(names(obsv)=="geonode_ortho_muf_rgb_idx_pca_scaled.7"))
+                    
+
+meta <- createGPMMeta(obsv, type = "input",
+                      selector = col_selector, 
+                      response = col_lc, 
+                      predictor = col_precitors, 
+                      meta = col_meta)
+
+#run AAAgpmClasses
+obsv <- gpm(obsv, meta, scale = FALSE)
+
+#highly correlating? nicht bei Erklärung, da erklärende Variable rausfliegen könnte
+#clean_pred <- cleanPredictors(x = obsv, nzv = TRUE, 
+#                           highcor = TRUE, cutoff = 0.70)
+
+#test&training, durschmischung des vector, struktur des objekts geschuldet
+obsv <- resamplingsByVariable(x = obsv,
+                              use_selector = FALSE,
+                              resample = 1, 
+                              grabs = 50)
+
+# Split resamples into training and testing samples
+p_val = 0.10
+obsv <- splitMultResp(x = obsv, 
+                      p = p_val, 
+                      use_selector = FALSE)
+
+#trainModel
+memory.limit(6000000)
+install.packages("doParallel")
+library(doParallel)
+cl = makeCluster(detectCores()-1)
+registerDoParallel(cl)
+
+obsv <- trainModel(x = obsv,
+                   n_var = NULL, 
+                   mthd = "rf",
+                   mode = "rfe",
+                   seed_nbr = 1, 
+                   cv_nbr = 5,
+                   var_selection = "indv", 
+                   filepath_tmp = NULL)
+
+
+#-----------------explore trainModel output------------------------------#
+
+#tstat <- compContTests(obsv@model$rf_rfe)
+#tstat[[1]]["Kappa_mean"]
+
+var_imp <- compVarImp(obsv@model$rf_rfe, scale = FALSE)
+var_imp_scale <- compVarImp(obsv@model$rf_rfe, scale = TRUE)
+
+plotVarImp(var_imp)
+bestmodel=which(df_kappa[,1]==max(df_kappa))
+
+plotVarImpHeatmap(var_imp_scale, xlab = "Species", ylab = "Band")
+
+obsv@model$rf_rfe[[1]][[1]]$testing$PREDICTED
+obsv@model$rf_rfe[[1]][[1]]$testing$RESPONSE
+obsv@model$rf_rfe[[1]][[1]]$model$pred
+
+#kappa 
+cont_table1 <- ftable(obsv@model$rf_rfe[[1]][[1]]$testing$PREDICTED, 
+                     obsv@model$rf_rfe[[1]][[1]]$testing$RESPONSE)
+levels(obsv@model$rf_rfe[[1]][[10]]$testing$RESPONSE)
+kappa=compKappa(cont_table1)
+
+saveRDS(obsv, file=paste0(path_out, "TrainModel_neu.rds"))
+obsv<-readRDS(paste0(path_out, "TrainModel_neu.rds"))
+obsv@model$rf_rfe[[1]][[8]]$model$fit$results$Kappa
+#best kappa rf_rfe[[1]][[10]]
+
+
+#get best model via calculating kappa
+df_kappa=matrix(NA, 10,1)
+for (i in seq(1:10)){ 
+  df_kappa[i,1]=compKappa(ftable(obsv@model$rf_rfe[[1]][[1]]$testing$PREDICTED, 
+                     obsv@model$rf_rfe[[1]][[1]]$testing$RESPONSE))
+}
+
+#-----------------------------------------------------------------------------#
+#Predicition over entire image area
+Muf_files <- stack( "C:/Users/Laura/Documents/Uni/Fernerkundung/Daten/w091/input/rdata/geonode_ortho_muf_rgb_idx_pca_scaled.tif")
+
+x <- list.files(paste0(path_rdata), pattern = ".tif$", full.names = TRUE, recursive = TRUE)
+muf = stack(x)
+plot(muf)
+
+
+muf_df <- getValues(muf)
+
+
+gpm_muf_lc_ta_segm_rf_predict <- predict(obsv@model$rf_rfe[[1]][[10]]$model$fit, newdata = muf_df,
+                                         na.action = na.pass)
+
+muf_lcc_prediction <- setValues(muf[[1]], as.numeric(as.character(gpm_muf_lc_ta_segm_rf_predict)))
+
+#save
+writeRaster(muf_lcc_prediction, paste0(path_out, "muf_lcc_prediction.tif"), overwrite = TRUE)
+
+# Read land-cover prediction data and segments #takes ages, segment shape should first be joined by table
+lccpred <- raster(paste0(path_out,"muf_lcc_prediction.tif"))
+
+memory.limit(5000000)
+lccseg <- readOGR(paste0(path_data, "vector.shp"))
+lccseg
+
+#change projection
+projection(lccpred) <- CRS("+init=epsg:25832")
+projection(lccseg)<- CRS("+init=epsg:25832")
+
+re <- setValues(lccpred, seq(ncell(lccpred)))
+re_extract <- extract(re, lccseg)
+
+#save
+saveRDS(re_extract, paste0(path_out, "re_extract.rds"))
+
+
+for(i in re_extract){
+  lccpred[i] <- modal(lccpred[i])
+}
+
+lccpred
+lccpred <- writeRaster(lccpred, paste0(path_out, "lcc_predict_segment_mod.tif"))
+
+#------------------------------ calculate kappa for validation------------------------------#
+#rs-ws-03-2
+# MOC - Remote Sensing (T. Nauss, C. Reudenbach)
+# 
+#' Compute Kappa based on contingency table
+#' 
+#' @description
+#' Compute Kappa index.
+#'
+#' @param ctable Contingency table
+#'
+#' @return Kappa index.
+#'
+compKappa <- function(ctable){
+  ctable <- ctable/sum(ctable)
+  categories <- nrow(ctable)
+  
+  # Fraction of agreement
+  pagrm <- 0
+  for(i in seq(categories)){
+    pagrm <- pagrm + ctable[i,i]
+  }
+  
+  # Expected fraction of agreement subject to the observed distribution
+  pexpct <- 0
+  for(i in seq(categories)){
+    pexpct <- pexpct + sum(ctable[i,]) * sum(ctable[,i])
+  }
+  
+  # Kappa index
+  kappa <- (pagrm - pexpct)/(1 - pexpct)
+  
+  return(kappa)
+}
+
+#get best model via calculating kappa
+df_kappa=matrix(NA, 10,1)
+for (i in seq(1:10)){ 
+  df_kappa[i,1]=compKappa(ftable(obsv, predlcc))
+}
+
+#trying to get max class count per segment
+count <- table(lccpred)
+max<-max(count)
+
+#pseudocode
+#for values per seg do overwrite with class value wich was max(counted) in segment 
+lccpred[seg(i)]<-whichclass(count[] == max(count))
+
+uniq=unique(obsv_10resam@data$input$LCC_ID)
+
+
+#####trying to get trainModel output as raster
+#doesnt´t work
+ras=as.raster(obsv_10resam@model$rf_rfe[[1]][[7]]$testing$PREDICTED)
+writeOGR(obsv_10resam@model$rf_rfe[[1]][[7]], dsn = paste0(path_out, "predict.shp"), driver = "ESRI Shapefile", layer = "pred")
+ras=obsv_10resam@model$rf_rfe[[1]][[7]]$testing$PREDICTED
+ras
+ratify(ras)
+is.raster(ras)
+df_ras = as.data.frame(ras)
+rgb_cal = raster(paste0("C:/Users/Laura/Documents/Uni/Fernerkundung/ergebnisse/rgbRaster_cal.tif"))
+r <- raster(ncol=12265, nrow=14795)
+extent(r)<-c(475927, 478886, 5630630, 5633083)
+res(r)<-0.2
+for (i in (seq(length(ras)))){
+  r[i]=ras[i]
+  }
+
+```
+
