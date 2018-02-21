@@ -1,0 +1,18 @@
+observation;groesse;header_vorhanden;header_strng;sonstige_strng;res_T;anmerkung
+./campbell/20110616_20110616_Campbell_Temp_RH_Radiation_5minRes.csv;763 kB;n;;;5min;ist gut
+./campbell/20120319_20121029_Campbell_Temp_RH_Radiation_1minRes.csv;3.8 MB;n;;;1min;ist gut
+./campbell/20121111_20141111_Campbell_CNR4_radiation_1minRes.csv;10.8 MB;n;;;1min;Ab 19/12/2012 taucht eine Spalte auf, header sollte diese enthalten!
+./campbell/20121111_20141111_Campbell_Temp_RH_1minRes.csv;9.9 MB;n;;;1min;ist gut
+./cl31/20091206_20140307_cl31_preprocessed.csv;910.9 MB;;;;;erstmal ignoriert
+./cl31/20091206_20141111_cl31_1mincldbase.csv;5.5 MB;;;;;erstmal ignoriert
+./cl31/20091206_20141111_cl31_backscatter_1minRes.csv;1.2 GB;;;;;erstmal ignoriert
+./cloudradar/20091206_20140307_rcr002_mod_preprocessed.csv;616.7 MB;;;;;erstmal ignoriert
+./cloudradar/20091206_20140430_rcr002_mod_CloudInfo_1min.csv;6.6 MB;;;;;erstmal ignoriert
+./cloudradar/20091206_20140430_rcr002_mod_Zrangecorrected_1minRes.csv;741.7 MB;;;;;erstmal ignoriert
+./gps_wv/20111021_20141111_gps_marb.csv;597.5 kB;j;Date;* ===>;15min; 00:07:30 00:22:30 etc
+./mrr/20091206_2014111_mrr_RR_1minRes.csv;44.4 MB;j;MRR >datum<;;1min;Header muss editiert werden
+./ott/20120229_20141001_Export_MengeNEZ.csv;33.4 kB;?;;;verschieden;komische Kopfzeilen, muss editiert werden
+./ott/20120229_20141001_Ott_Rain_1minRes.csv;558.7 kB;j;date;;5min;5min Res statt 1min !
+./usa/20091206_usa_1minRes.csv;63.4 MB;j;date;;1min;ist gut
+./vpf710/20091206_20141111_VPF710_20Sek.csv;71.9 MB;n;;;7sec;00:00:04 00:00:11 etc
+./vpf730/20091206_20141111_VPF730_20Sek.csv;43.3 MB;n;;;1min;pro min 3 Eintraege aber nicht sekundengenau
