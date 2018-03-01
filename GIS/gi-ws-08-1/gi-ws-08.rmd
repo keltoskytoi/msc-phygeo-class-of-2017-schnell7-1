@@ -9,13 +9,14 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-exercise:
-- CHM (normalisiert) 1m
-- r befehl: focal(), moving window  (50m) --> varianz
-- absolute hÃ¶hen + Schwellenwert
+Aufgabe:
+Mit Hilfe des focalwindows (funktion raster::focal()) einen Filter über das Bild laufen lassen, der mit der Varianzfunktion Veränderungen in der Höhenstruktur eines normalisierten Canopy-Height-Models (Baumhöhenmodell) erkennen kann um auf diese Weise Lichtungen zu erkennen
 
---> Anteil an Lichtung
+Abschließend ist der Anteil an Lichtungen im Waldgebiet zu berechnen
 
+
+
+Wir haben uns dazu entschlossen, als funktion die focal() benutzt nicht nur die Variany zu benutzen sondern gleichzeitig auf den mean()-Wert des entsprechendes Fensters zu achten. Die Varianz soll primär dafür sorgen, dass der Unterschied zwischen hohen und niedrigen Bäumen erkannt wird. Das Einbeziehen des Mittelwerts soll ermöglichen, dass auch  Lichtungen di enicht Baumfrei sind erfasst werden. Der Paramter "mean-kill" (siehe funktion lichtung hier oder clearing im ordner funktionen) lässt sich interpretieren als "wie hoch darf ein Baum -im Mittel- sein um noch zur Lichtung zu gehören". 
 ```{r, echo = T}
 setwd("C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Lichtung")
 
@@ -144,8 +145,13 @@ lichtung = function(x, mat_size, min_size, mean_kill, var_kill, save) {
 #    }
 #  }
 #}
+```
 
+Die folgende Abbildung zeigt exemplarisch ein Ergebnis mit den Werten 
+mat_size = 17, min_size = 3, mean_kill = 7, var_kill = 1000
+Die Berechnung des Anteils bezieht sich auf das ganze Bild und soll hier nur exemplarisch stehen. Logisch wäre eigentlich, dass Lichtungen nur im Wald vorkommen und deshalb dieser Bildauschnitt erst entsprechend auf Waldgebiete zu geschnitten wird (vermittels clip). Die großen zusammenhängenden Flächen in der linken, oberen und linken unteren Seite des Bildes sind Felder keine Lichtungen im engeren Sinne.
 
+```{r, echo=T}
 #calculate percentage of clearings on total imagearea
 oldw <- getOption("warn")
 options(warn = -1)
@@ -161,6 +167,11 @@ lichtung_proz
 ```
 
 
+Dieses Bild zeigt die Ergebnisse mit verschiedenen Paramtereinstellung. Es scheint als hätte der Parameter "mat_size", also die größe des focalwindows den größten Einfluss auf das enstehende Bild. Einerseits ist ein geringer Wert (=hohe Genauigkeit) wünschensert um die Ränder einer Lichtung zu beschreiben wünschenswert, andererseits werden durch diesen Ansatz viele kleine Lücken im Wald, die eigentlich keine "Lichtungen" sind miterfasst. Ist das focalwindow aber "zu groß" wird nicht die ganze Flächeder Lichtung erkannt und ist für eine Anteilsberechung unbrauchbar.
+Unser Vorschlag ist es, dass die Pixel die mit hohen mat?siye Werten entstanden sind als "Bestätigung" der Flächen zu nehmen die mit geringerem Werten erstellt wurden.
+Bezogen auf das Bild heißt das, dass gelb/orange Flächen (kleiner Wert) die schwarze Pixel enthalten (großer Wert) als Lichtung anerkannt werden und die Fläche der Lichtung mit den gelb/organgen berechnet wird.
+Die Erkennung muss aber in jedem Fall mit Luftbildern verifiziert werden und ggf manuell angepast werden, die auf diesem Wege entdecken Flächen können nur als Hilfsmittel verstanden werden die dem Fernerkundenden bei der Auswahl von Lichtungen leiten.
+
 ```{r, echo = T}
 #show png: output with different window sizes
 
@@ -175,4 +186,3 @@ lim <- par()
 rasterImage(img, lim$usr[1], lim$usr[3], lim$usr[2], lim$usr[4])
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

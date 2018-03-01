@@ -1,0 +1,228 @@
+---
+title: "gi-ws-08-1"
+author: "Laura Giese, Johannes Schnell, Alena Schmid"
+date: "15 Januar 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Deriving Clearings in Caldern forest
+
+> structure: the scripts contain the following steps:
+
+* Raw Script for Deriving Clearings in Caldern forest
+    + set environment, parameters and read files
+          * set function parameters
+          * list input files
+    + Canopy Height Model (CHM)
+          * extract groundpoints of las data and create dtm
+          * normalize las cloud
+          * calculate chm and save as .asc file
+    + define 2 functions to calculate a raster with clearings
+          * myfun
+          * lichtung
+* run functions and show result 
+    + show output raster with clearings
+    + calculate percentage of clearings on total imagearea
+* Show Results with different Parameter settings
+
+#---------------------------------------------------------------------------#
+####Raw Script for Deriving Clearings in Caldern forest
+
+Aufgabe:
+Mit Hilfe des focalwindows (funktion raster::focal()) einen Filter über das Bild laufen lassen, der mit der Varianzfunktion Veränderungen in der Höhenstruktur eines normalisierten Canopy-Height-Models (Baumhöhenmodell) erkennen kann um auf diese Weise Lichtungen zu erkennen
+
+Abschließend ist der Anteil an Lichtungen im Waldgebiet zu berechnen
+
+
+Wir haben uns dazu entschlossen, als funktion die focal() benutzt nicht nur die Varianz zu benutzen sondern gleichzeitig auf den mean()-Wert des entsprechendes Fensters zu achten. Die Varianz soll primär dafür sorgen, dass der Unterschied zwischen hohen und niedrigen Bäumen erkannt wird. Das Einbeziehen des Mittelwerts soll ermöglichen, dass auch  Lichtungen die nicht Baumfrei sind erfasst werden. Der Paramter "mean-kill" (siehe funktion lichtung hier oder clearing im ordner funktionen) lässt sich interpretieren als "wie hoch darf ein Baum -im Mittel- sein um noch zur Lichtung zu gehören".
+
+```{r, echo = T}
+#---------------------------------------------------------------------------#
+############ set environment, function parameters and read files  ########### 
+#---------------------------------------------------------------------------#
+
+setwd("C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Lichtung")
+
+library("rgdal")
+#install.packages("rgdal")
+library("raster")
+#install.packages("raster")
+
+##main directory
+mainDir <- "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Lichtung"
+##input folder: put all 4 las data in this folder (if you did run this skript before, make sure to delete the .txt file!!!)
+inDir <- "/input/"
+## output folder
+outDir <- "/output/"
+## Fusion binary folder
+Fusion <- "C:/FUSION/"
+
+#######set PARAMETERS für functions myfun() and lichtung() #######
+
+# muss ungrade sein (5,13(!),23,51)
+mat_size = 17
+#muss ungrade sein, am besten klein (3,5,7), 1 = ausgeschaltet
+min_size = 3
+#schwellenwerte scheinen erst bei grossen mat_size wichtig zu werden
+#schwellwert fuer mean(grosseMatrix)
+mean_kill = 7
+schwei <- mean_kill
+#schwellwert fuer var(grosseMatrix), falls viele baueme auf der lichtung umherstehen sollte dieser eher gross sein
+var_kill = 1000
+nerei <- var_kill
+#soll gespeichert werden? dann ohne zuordnung, wenn FALSE kann function zugeordnet werden (und dann zb plot() oder writeRaster()
+save = T
+
+#list las files
+las_files <-list.files(paste0(mainDir, inDir), pattern = ".las$", full.names = TRUE, recursive = TRUE)
+##write the whole file path and name into a .txt
+lapply(las_files, write, paste0(mainDir, inDir, "lidar_files.txt"), append = T)
+
+#---------------------------------------------------------------------------#
+############ canopy hight model CHM ########### 
+#---------------------------------------------------------------------------#
+
+#infos ueber die .las
+system(paste0(Fusion, "catalog.exe ", 
+              mainDir, inDir, "lidar_files.txt " , 
+              mainDir, outDir, "info_caldern.html"))
+
+### Create a .las with groundpoints only
+#.txt --> class_GroundPts.las
+system(paste0(Fusion,"clipdata.exe"," /class:2 ",
+              mainDir,inDir,"lidar_files.txt ",
+              mainDir, outDir,"classified_GroundPts.las ", 
+              "476000 5630000 479000 5633000"))
+
+### Create the required PLANS DTM format
+#class_GroundPts.las --> caldernGridSurf.dtm
+system(paste0(Fusion, "gridsurfacecreate.exe ", 
+              mainDir, outDir, "caldern_GridSurf.dtm ", "1 M M 1 32 0 0 ", 
+              mainDir, outDir, "classified_GroundPts.las "))
+
+#dtm2asc
+system(paste0(Fusion, "dtm2ascii.exe ",
+              mainDir,outDir, "caldern_GridSurf.dtm ",
+              mainDir,outDir, "lichtung_GridSurf.asc "))
+
+### normalize heights of las point cloud
+#CaldernGridSurf.dtm --> cald_NORMALIZED_poit_cloud.las
+system(paste0(Fusion, "clipdata.exe ", "/height /dtm:", 
+              mainDir, outDir, "caldern_GridSurf.dtm ", 
+              mainDir, inDir, "lidar_files.txt ", 
+              mainDir, outDir, "lichtung_normalized_point_cloud.las ", 
+              "476000 5630000 479000 5633000"))
+
+##create canopymodel canopy_surface.dtm
+system(paste0(Fusion, "canopymodel.exe", " /ascii ", 
+              mainDir, outDir, "canopy_surface_model.asc ", 
+              paste0(" 1 M M 1 32 0 0 "), 
+              mainDir, outDir, "lichtung_normalized_point_cloud.las "))
+
+chm4las = raster(paste0(mainDir, outDir, "canopy_surface_model.asc"))
+
+#---------------------------------------------------------------------------#
+####define 2 functions to calculate a raster with clearings ########### 
+#---------------------------------------------------------------------------#
+
+#1. function for thresholds: myfun()
+#mean_kill=threshold for max_tree_height
+#var_kill=threshold for variance
+myfun = function(x, mean_kill = schwei, var_kill= nerei){
+  if(mean(x, na.rm = T)< mean_kill && var(x, na.rm = T) < var_kill ){
+    return(1)
+  }
+  else{
+      return(NA)
+    }
+  }
+
+#2. lichtung() erstellt .asc mit Lichtungen, 
+#fuehrt erst vorfilter aus, dann werden lichtungen erkannt, 
+#die werte grosser als *_kill werden NA gesetzt
+lichtung = function(x, mat_size, min_size, mean_kill, var_kill, save, mainDir, outDir) {
+  print(paste(c(x, mat_size, min_size, mean_kill, var_kill, save)))
+  w_min = matrix(1, min_size, min_size)
+  w_ges = matrix(1, mat_size, mat_size)
+  pre_min = focal(x, w = w_min, fun = min, na.rm =T)
+  schwei = mean_kill
+  nerei = var_kill
+  lich = focal(x = pre_min, w = w_ges, fun = myfun)
+  
+  if (save == T) {
+    writeRaster(lich, filename = paste0(mainDir, outDir, "lichtung_min", min_size, "_var", mat_size, "_", mean_kill, "_", var_kill, ".asc"))
+  }
+  else{
+    return(lich)
+  }
+}
+
+#run once with specific values
+#lichtung(chm4las, mat_size = mat_size, min_size = min_size, mean_kill = mean_kill, var_kill = var_kill, save=T)
+
+#run several times with different values for function variables
+
+#for(minv in c(3)){
+#  for(matv in c(13,17,23,31,51)){
+#    for(mk in c(7)){
+#      for(vk in c(1000)){
+#        lichtung(chm4las, mat_size = matv, min_size = minv, mean_kill = mk, var_kill = vk, save=T)
+        
+#      }
+#    }
+#  }
+#}
+```
+
+#---------------------------------------------------------------------------#
+####Results: show output raster with clearings and calculate percentage of clearings on total imagearea
+
+Die folgende Abbildung zeigt exemplarisch ein Ergebnis mit den Werten 
+mat_size = 17, min_size = 3, mean_kill = 7, var_kill = 1000
+Die Berechnung des Anteils bezieht sich auf das ganze Bild und soll hier nur exemplarisch stehen. Logisch wäre eigentlich, dass Lichtungen nur im Wald vorkommen und deshalb dieser Bildauschnitt erst entsprechend auf Waldgebiete zu geschnitten wird (vermittels clip). Die großen zusammenhängenden Flächen in der linken, oberen und linken unteren Seite des Bildes sind Felder keine Lichtungen im engeren Sinne.
+
+```{r, echo=T}
+# hide warning messages
+oldw <- getOption("warn")
+options(warn = -1)
+
+#run functions
+anteil = lichtung(chm4las, mat_size = 17, min_size = 3, mean_kill = 7, var_kill = 1000, save=F)
+lichtung(chm4las, mat_size = 17, min_size = 3, mean_kill = 7, var_kill = 1000, save=T,
+         mainDir="C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Lichtung", outDir="/output/")
+
+options(warn = oldw)
+
+#show result
+plot(anteil)
+#calculate percentage of clearings
+lichtung_proz = length(which(anteil@data@values == 1)) *100 / (anteil@ncols * anteil@nrows)
+print(paste0("Anteil an Lichtung in Prozent:_", lichtung_proz))
+```
+
+#---------------------------------------------------------------------------#
+####Show Results with different Parameter settings
+
+Dieses Bild zeigt die Ergebnisse mit verschiedenen Paramtereinstellung. Es scheint als hätte der Parameter "mat_size", also die größe des focalwindows den größten Einfluss auf das enstehende Bild. Einerseits ist ein geringer Wert (=hohe Genauigkeit) wünschensert um die Ränder einer Lichtung zu beschreiben wünschenswert, andererseits werden durch diesen Ansatz viele kleine Lücken im Wald, die eigentlich keine "Lichtungen" sind miterfasst. Ist das focalwindow aber "zu groß" wird nicht die ganze Flächeder Lichtung erkannt und ist für eine Anteilsberechung unbrauchbar.
+Unser Vorschlag ist es, dass die Pixel die mit hohen mat?siye Werten entstanden sind als "Bestätigung" der Flächen zu nehmen die mit geringerem Werten erstellt wurden.
+Bezogen auf das Bild heißt das, dass gelb/orange Flächen (kleiner Wert) die schwarze Pixel enthalten (großer Wert) als Lichtung anerkannt werden und die Fläche der Lichtung mit den gelb/organgen berechnet wird.
+Die Erkennung muss aber in jedem Fall mit Luftbildern verifiziert werden und ggf manuell angepast werden, die auf diesem Wege entdecken Flächen können nur als Hilfsmittel verstanden werden die dem Fernerkundenden bei der Auswahl von Lichtungen leiten.
+
+
+```{r, echo = T}
+#show png: output with different window sizes
+
+#install.packages("raster")
+library("png")
+
+img <- readPNG("C:/Users/Laura/Documents/GitHub/msc-phygeo-class-of-2017-lgiese/gis/gi-ws-08-1/gi-ws-08-1.png")
+plot(1:600, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "Results with different Parameter settings")
+
+lim <- par()
+rasterImage(img, 110, -10, 500, 610)
+```
+

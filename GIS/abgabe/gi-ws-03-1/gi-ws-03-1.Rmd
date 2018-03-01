@@ -1,0 +1,21 @@
+---
+title: "gi-ws-03-1"
+author: "Laura Giese, Johannes Schnell, Alena Schmid"
+date: "27 Februar 2018"
+output: html_document
+---
+# Vertical Forest Structure
+#### improved workflow for deriving vertical forest structure by using LIDAR point clouds
+
+```{r, echo = FALSE, eval = TRUE}
+library(png)
+
+img <- readPNG("C:/Users/Laura/Documents/GitHub/msc-phygeo-class-of-2017-lgiese/gis/gi-ws-03-1/gi-ws-03-1.png")
+
+plot(0:600, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "Flow Chart: Vertical Forest Structure")
+
+lim <- par()
+rasterImage(img, 180, -10, 420, 610)
+```
+
+

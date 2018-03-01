@@ -1,0 +1,140 @@
+---
+title: "workflow functions"
+author: "Laura Giese, Johannes Schnell, Alena Schmid"
+date: "28 Februar 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###This script summarizes the most important steps of gis class gi-ws17/18
+run functions in folder "function" on github:
+https://github.com/logmoc/msc-phygeo-class-of-2017-lgiese/tree/master/gis
+ 
+
+```{r, echo = T, eval = F}
+#setwd
+setwd("C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/createpackage")
+
+#1. clip (several) las files to requestet extent
+clip2newExtent(mainDir = "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/createpackage",
+               inDir = "/input/", outDir = "/newExtent/",
+               xmin = "477390.0", xmax = "477580.0", ymin = "5631900.0", ymax = "5632100.0",
+               proj = "+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0+units=m +no_defs")
+
+#2. derive height classes (requred step: 1.)
+heightClasses(pathFusion = "C:/FUSION/",
+              mainDir="C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/createpackage", 
+              inDir="/newExtent/", tempDir="/temp/", outDir="/heightclasses/", 
+              meta = "30 M M 1 32 0 0", heights = c(2,5,10,15,20,50))
+
+#3. derive fhd index (requred step: 1. and 2.)
+fhd(pathFusion = "C:/FUSION/", 
+    mainDir="C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/createpackage", 
+    inDir="/heightclasses/", tempDir="/temp/", outDir="/output/fhd/", 
+    cellsize = c(30), heights = c(2,5,10,15,20,50))
+
+#4. derive height classes (requred step: 1.)
+CHMfunction(pathFusion = "C:/FUSION/",
+            mainDir="C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/createpackage", 
+            inDir="/newExtent/", tempDir="/temp/", outDir="/CHM/", 
+            meta = "30 M M 1 32 0 0")
+
+#5. derive vdr index (requred step: 1. and 4.)
+vdrIndexFunc(pathFusion = "C:/FUSION/",
+             mainDir="C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/createpackage", 
+             inDir="/newExtent/", CHMDir="/CHM/", tempDir= "/temp/", outDir="/output/vdr/",
+             cellsize = 30,
+             parameter = 31)
+
+#6. derive clearings (requred step: 1. and 4.)
+library(raster)
+chm_las = raster("C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/createpackage/CHM/canopy_surface_mod.asc")
+plot(chm_las)
+clearing(chm_las , min_size = 1, save=TRUE)
+
+#7. detect single trees (requred step: 1. and 4.)
+singletreedetectlidr = function(chm, las,
+                               output,
+                               treeheight,
+                               crowndm = NULL,
+                               overwrite = TRUE,
+                               method = method) {
+
+  lib = c("lidR", "raster", "rgdal", "EBImage")
+  
+  
+  if (method == "dalponte2016"){
+    # 1. way of segmentation: dalponte
+    # DIST: crown diameter, th = hight below which pixel cannot me a crown, def = 2
+    SensAnalysisFiles = matrix(NA, 36, 6)
+    x = 0
+    
+    for (i in treeheight){
+      for (j in crowndm){
+        t1 = Sys.time()
+        extra = lidR::lastrees(las, "dalponte2016", chm, th = i, DIST = j, extra = TRUE)
+        t2 = Sys.time()
+        crown.shp <- raster::rasterToPolygons(extra$Crown, dissolve = TRUE)
+        treenumber<-nrow(crown.shp@data)
+        
+        rgdal::writeOGR(crown.shp, paste0(output, "crown_th", i,"_cd", j,"_", method, ".shp"), 
+                        paste0(basename(paste0(output, "crown_th", i,"_cd", j,"_", method, ".shp"))), 
+                        driver = "ESRI Shapefile", overwrite = overwrite)
+        Maxima.shp <- raster::rasterToPolygons(extra$Maxima, dissolve = TRUE)
+        treenumber<-nrow(Maxima.shp@data)
+        
+        rgdal::writeOGR(Maxima.shp, paste0(output, "Maxima_th", i,"_cd", j,"_", method,".shp"), 
+                        paste0(basename(paste0(output, "Maxima_th", i,"_cd", j,"_", method, ".shp"))), 
+                        driver = "ESRI Shapefile", overwrite = overwrite)
+        print("dalponte2016")
+        x = x+1
+        SensAnalysisFiles[x,1] = paste0("Maxima_and_crown_th", i,"_cd", j,"_", method, ".shp")
+        SensAnalysisFiles[x,2] = method
+        SensAnalysisFiles[x,3] = i
+        SensAnalysisFiles[x,4] = j
+        SensAnalysisFiles[x,5] = t2-t1
+        SensAnalysisFiles[x,6] = treenumber
+        
+      }
+    }
+    
+  }else if(method == "watershed"){
+    SensAnalysisFiles = matrix(NA, 6, 6)
+    x = 0
+    #2. way of segmentation: watershed
+    #th: hight below which pixel cannot me a crown, def = 2
+    for (i in treeheight){
+      t1 = Sys.time()
+      extra = lidR::lastrees(las, "watershed", chm, th = i, extra = TRUE)
+      t2 = Sys.time()
+      extra.shp <- raster::rasterToPolygons(extra, dissolve = TRUE)
+      treenumber<-nrow(extra.shp@data)
+      
+      rgdal::writeOGR(extra.shp, paste0(output, "crown_th", i,"_", method, ".shp"), 
+                      paste0(basename(paste0(output, "crown_th", i,"_", method, ".shp"))), 
+                      driver = "ESRI Shapefile", overwrite = overwrite)
+      print("watershed")
+      x = x+1
+      SensAnalysisFiles[x,1] = paste0("crown_th", i,"_", method, ".shp")
+      SensAnalysisFiles[x,2] = method
+      SensAnalysisFiles[x,3] = i
+      SensAnalysisFiles[x,5] = t2-t1
+      SensAnalysisFiles[x,6] = treenumber
+    }
+    
+  }
+  return(SensAnalysisFiles)
+}
+
+
+
+runSingleTreeDetectionLidR(chm = your_chm, las = you_las_files, output = temp,
+                           treeheight = c(5:10), crowndm = c(5,7,10,15,20,25), 
+                           overwrite = TRUE)
+
+
+```
+

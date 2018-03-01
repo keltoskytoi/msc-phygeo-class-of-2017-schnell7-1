@@ -1,0 +1,30 @@
+---
+title: "gi-ws-04-1"
+author: "Laura Giese, Alena Schmid, Johannes Schnell"
+date: "13 November 2017"
+output: html_document
+---
+## First try to calculate VDR
+The following screenshot shows our first try to derive the Vertical Distribution Ratio (VDR) by working with Fusion on one tile (LIDAR data) of the study area.
+The Canopy Height Model (CHM) for the whole study area is fully processed (visible underneath the tile).
+Something went wrong as there are many negative VDR values.
+
+```{r, echo=FALSE, eval = TRUE}
+#install.packages("png", dependencies=TRUE)
+library("png")
+
+img <- readPNG("C:/Users/Laura/Documents/GitHub/msc-phygeo-class-of-2017-lgiese/gis/gi-ws-04-1/gi-ws-04-1.png")
+plot(1:600, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "First result: Vertical Distribution Ratio")
+
+lim <- par()
+rasterImage(img, 10, -50, 500, 610)
+```
+
+> Arbeitsschritte um den VDR Index mit ArcGis zu berechnen:
+
+1. Las to raster
+    + DGM: Binning: Zellenzuweisungstyp: Minimum; Abtastwert:1
+    + DSM: Binning: Zellenzuweisungstyp: Maximum; Abtastwert:1
+    + HOME: Binning: Zellenzuweisungstyp: Average; Abtastwert:1
+
+2. Raster Calculator: (DSM-HOME)/DSM

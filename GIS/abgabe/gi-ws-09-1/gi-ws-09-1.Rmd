@@ -1,0 +1,220 @@
+---
+title: "gi-ws-09-1"
+author: "Laura Giese, Johannes Schnell, Alena Schmid"
+date: "22 Januar 2018"
+output: html_document
+---
+###script for single tree detection with package LidR (for las data):
+
+#---------------------------------------------------------------------------#
+> structure: the scripts contain the following steps:
+
+1. Set Environment
+2. correct extent for U4775632
+3. clip las data to requested extent (input here: two files)
+4. generate normalized canopy height model (chm) (input: dtm)
+5. clip chm to same extent as las data 
+6. single tree detection with 3 diffenrent algorithms
+
+#---------------------------------------------------------------------------#
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Set Environment
+
+```{r, echo = T}
+#---------------------------------------------------------------------------#
+############ set environment and load packages  ########### 
+#---------------------------------------------------------------------------#
+
+setwd("C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Einzelbaum/output")
+# input directory with file with wrong extent
+input = "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Einzelbaum/input/"
+# output dir
+output = "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Einzelbaum/output/"
+#temp: input with file with corrected extent and second las file
+temp = "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Einzelbaum/temp/"
+
+# install packages
+#install.packages("lidR", dependencies = T)
+library(lidR)
+library(raster)
+library(rgdal)
+library(maptools)
+library(png)
+
+## try http:// if https:// URLs are not supported
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("EBImage")
+#install.packages("EBImage")
+#library(EBImage)
+#unfortunatelly unable to load EBIMage package
+```
+
+#---------------------------------------------------------------------------#
+####correct extent for U4775632
+
+```{r, echo = T, eval = F}
+#--------------------------------------------#
+#######solve problem with missing extent######
+#--------------------------------------------#
+lasfile1 = paste0(input,"U4775632.las")
+file.info(lasfile1)$size/1e6
+
+las = readLAS(lasfile1, select = "xyz")
+#use cut function to get right extent
+subset = las %>% lasclipRectangle(xleft = 477000, ybottom = 5632000, xright = 478000, ytop = 5633000, inside = TRUE)
+
+#kann raus
+#ex_las=extent(477000, 478000, 5632000, 5633000)
+#extent(las) = ex_las
+#las@header@PHB$`Min X`<-as.numeric(c("477000"))
+#las@header@PHB$`Min Y`<-as.numeric(c("5632000"))
+
+#save corrected lasfile
+writeLAS(subset, file = paste0(temp, "extU4775632.las"))
+```
+
+#---------------------------------------------------------------------------#
+####START script for steps 3. to 6.
+
+> structure of following part:
+
+3. clip las data to requested extent (input here: two files)
+4. generate normalized canopy height model (chm) (input: dtm)
+5. clip chm to same extent as las data 
+6. single tree detection with 3 diffenrent algorithms
+
+```{r, echo = T}
+#load las files: extU4775632.las with corrected extent and U4775631.las 
+#from temp directory
+
+#for loading las files
+lasfile1 = paste0(input, "extU4775632.las")
+lasfile2 = paste0(input, "U4775631.las")
+
+#get info
+file.info(lasfile1)$size/1e6
+file.info(lasfile2)$size/1e6
+
+#load lasfiles in one cloud
+#make sure that input folder contains only the las files you need for your cloud
+catalog = catalog(paste0(input))
+las = readLAS(catalog, select = "xyz")
+
+#change projection
+las@crs@projargs<- c("+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0+units=m +no_defs")
+#las
+#plot(las, color = "Z", colorPalette = heat.colors(50), bg = "black")
+
+
+#--------------------------------------------#
+#################clip las files###############
+#--------------------------------------------#
+
+#clip las files to extent 477425.0 477710.0 5631990.0 5632150.0 (nach Angabe von C. Reudenbach)
+mrect = matrix(c(477425, 477710, 5631990, 5632150), ncol = 2) #create rect. matr
+las_cl = las %>% lasclip("rectangle", mrect)
+plot(las_cl, color = "Z", colorPalette = heat.colors(50), bg = "black", trim)
+#writeLAS(las_cl, file = paste0(output, "las_clip.las"))
+
+#--------------------------------------------#
+#########normalize las file###################
+#--------------------------------------------#
+
+#create matrix for crop with shape file
+coords = matrix(c(477425, 5632150,
+                  477710, 5632150,
+                  477710, 5631990,
+                  477425, 5631990), ncol = 2, byrow = TRUE)
+
+#create polygon shape file for crop dtm
+P1 = Polygon(coords)
+Ps1 = SpatialPolygons(list(Polygons(list(P1), ID = "a")), proj4string=CRS("+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0+units=m +no_defs"))
+plot(Ps1, axes = T)
+
+#->load dtm (created in "gi-ws08-1 Lichtungen")
+dtm = raster(paste0(input, "lichtung_GridSurf.asc"))
+dtm@crs@projargs<- c("+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0+units=m +no_defs")
+
+#crop to same extent as las_cl
+dtm_cr = crop(dtm, Ps1)
+plot(dtm_cr)
+
+#save cropped dtm
+#writeRaster(dtm_cr, "dtm_crop_Baum.asc")
+
+#normalize
+lasnormalize(las_cl, dtm_cr)
+
+#change coordinate system
+las_cl@crs@projargs<- c("+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0+units=m +no_defs")
+las_cl
+plot(las_cl)
+#save clipped normalized las file
+#writeLAS(las_cl, file = "las_clip_norm.las")
+
+#----------------------------------------------------------------------#
+###------------compute chm & single tree detection-------------------###
+#----------------------------------------------------------------------#
+
+# compute a canopy image
+chm = grid_canopy(las_cl, res = 0.5, subcircle = 0.1, na.fill = "knnidw", k = 4)
+chm = as.raster(chm)
+# smoothing post-process (e.g. 2x mean)
+kernel = matrix(1,3,3)
+chm = raster::focal(chm, w = kernel, fun = mean)
+chm = raster::focal(chm, w = kernel, fun = mean)
+raster::plot(chm, col = height.colors(50)) # check the image
+
+#----------------------------------------------------------------------#
+# 1. way of segmentation: dalponte 
+lastrees(las_cl, "dalponte2016", chm, th = 5)
+#plot points that actually are trees
+trees = lasfilter(las_cl, !is.na(treeID))
+plot(trees, color = "treeID", colorPalette = random.colors(100))
+#plot result
+img <- readPNG("C:/Users/Laura/Documents/GitHub/msc-phygeo-class-of-2017-lgiese/gis/gi-ws-09-1/dalponte_st.png")
+plot(1:1, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "dalponte")
+
+lim <- par()
+rasterImage(img, lim$usr[1], lim$usr[3], lim$usr[2], lim$usr[4])
+
+#----------------------------------------------------------------------#
+#2. way of segmentation: watershed
+#doesn´t work in Rmd-file as EBImage package needs to be loaded from a special page on the internet?!
+#see library(EBImage)
+#lastrees(las_cl, "watershed", chm, th = 5)
+# plot points that actually are trees
+#trees = lasfilter(las_cl, !is.na(treeID))
+#plot(trees, color = "treeID", colorPalette = random.colors(100))
+
+#plot(trees, color = "treeID", colorPalette = random.colors(100))
+
+#plot png instead
+img <- readPNG("C:/Users/Laura/Documents/GitHub/msc-phygeo-class-of-2017-lgiese/gis/gi-ws-09-1/watershed_st.png")
+plot(1:1, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "watershed")
+
+lim <- par()
+rasterImage(img, lim$usr[1], lim$usr[3], lim$usr[2], lim$usr[4])
+
+#----------------------------------------------------------------------#
+#3. way of segmentation: Li 2012
+lastrees(las_cl, "li2012")
+# plot points that actually are trees
+trees = lasfilter(las_cl, !is.na(treeID))
+plot(trees, color = "treeID", colorPalette = random.colors(100))
+#plot
+img <- readPNG("C:/Users/Laura/Documents/GitHub/msc-phygeo-class-of-2017-lgiese/gis/gi-ws-09-1/li2012seg_st.png")
+plot(1:1, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "li2012")
+
+lim <- par()
+rasterImage(img, lim$usr[1], lim$usr[3], lim$usr[2], lim$usr[4])
+
+#save las data with single trees
+trees@crs@projargs<- c("+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0+units=m +no_defs")
+#writeLAS(trees, file = "sing_trees_dp.las")
+
+```
