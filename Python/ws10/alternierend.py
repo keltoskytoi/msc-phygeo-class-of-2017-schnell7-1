@@ -62,7 +62,7 @@ def prominenz(start, ar, dwn_step):
     fillv = ar[start[0][0]][start[0][1]]
     startval = (start[0][0], start[0][1])
     gipfel = False
-    fillserie = [int(dwn_step/2**y) for y in range(int(math.log(x,2)+1))]
+    fillserie = [int(dwn_step/2**y) for y in range(int(math.log(dwn_step,2)+1))]
     while gipfel == False:
         fillv = fillv - fillserie[0]
         print(fillv)
@@ -95,19 +95,8 @@ def prominenz(start, ar, dwn_step):
     return(neuer_fill, "")
         
 #%%        
-x = 128
-kk =[x/2**y for y in range(int(math.log(x,2)+1))]
 
-#%%
-range(len(kk[1:])-2)
-#%%
-k[0]
-#%%        
-        
-        
-        
-        
-#        return(fillv, gval[1])
+
     
 #%%
     
