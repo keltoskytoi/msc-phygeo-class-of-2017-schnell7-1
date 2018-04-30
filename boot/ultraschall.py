@@ -53,7 +53,7 @@ if __name__ == '__main__':
         # Beim Abbruch durch STRG+C resetten
     except KeyboardInterrupt:
         # Write CSV file
-        with open('../tab/werte.csv', 'w') as fp:
+        with open('/home/pi/tab/werte.csv', 'w') as fp:
             writer = csv.writer(fp, delimiter=',')
             # writer.writerow(["your", "header", "foo"])  # write header
             writer.writerows(a)
