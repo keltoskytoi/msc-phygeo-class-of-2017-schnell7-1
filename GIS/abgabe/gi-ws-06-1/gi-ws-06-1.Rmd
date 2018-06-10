@@ -1,0 +1,261 @@
+---
+title: "gi-ws-06-1"
+author: "Laura Giese, Johannes Schnell, Alena Schmid"
+date: "12 Dezember 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Script for deriving VDR-Index (Vertical Distribution Ratio) and a function for deriving height classes
+details: see Fusion Manual for details
+
+> script structure:
+
+1. Function for deriving height classes
+2. Raw script to calculate VDR index (proceeding gi-ws-05-2)
+3. Show results of VDR index
+
+#---------------------------------------------------------------------------#
+#### 1. First try to write a function to obtain height slices with point density
+steps are explained in the script
+> description: the function "classes(listFiles, mainDir, inDir, heights, cellsize)" wrappes the first part of the fusion workflow
+the function contains the following steps:
+
+* list input files
+* extract groundpoints of las data and create dtm
+* normalize las cloud 
+* create height classes (slices of point cloud from zmin to zmax)
+* derive point density per height class (counting points per height class)
+* get .asc files with point density of every height class
+
+
+```{r, echo = T, eval = F}
+#---------------------------------------------------------------------------#
+############ set environment and read files ########### 
+#---------------------------------------------------------------------------#
+
+mainDir <- "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing"
+##input folder
+inDir <- "/input/"
+## output folder
+outDir<- "/temp/"
+## Fusion binary folder
+Fusion<-"C:/FUSION/"
+
+#list las files in input folder
+las_files<-list.files(paste0(mainDir,inDir), pattern=".las$", full.names=TRUE,recursive = TRUE)
+
+#write the whole file path and name into a .txt
+lapply(las_files, write,paste0(mainDir,inDir,"lidar_files.txt"), append=T)
+
+#vector of height steps (m) for height slizes
+zValues<-c(0,2,5,10,15,25,30,50)
+
+#---------------------------------------------------------------------------#
+########### function to create height slices with point density #############
+#---------------------------------------------------------------------------#
+
+classes<-function(listFiles, mainDir, inDir, heights, cellsize){
+  for (j in seq(length(listFiles))){
+########### get some basic data########
+### basic informations
+    system(paste0(Fusion, "catalog.exe ", listFiles[j]," ", mainDir, outDir, j,".html"))
+    extend<-read.csv(paste0(mainDir, outDir, j,".csv"), sep = ",", header = T)
+### Create a .las with groundpoints only
+    system(paste0(paste0(Fusion, "clipdata.exe"," /class:2 ", listFiles[j]," ", 
+                  mainDir, outDir, "classified_GroundPts_",j,".las "), 
+                  paste(extend$MinX, extend$MinY, extend$MaxX, extend$MaxY)))
+
+### Create the required PLANS DTM format
+    system(paste0(Fusion, "gridsurfacecreate.exe ", mainDir, outDir, "caldern_GridSurf_",j,".dtm ",
+                  cellsize," M M 1 32 0 0 ", mainDir, outDir, "classified_GroundPts_",j,".las"))
+
+### normalize heights of las point cloud
+    system(paste0(paste0( Fusion, "clipdata.exe", " /height /dtm:",mainDir, outDir,"caldern_GridSurf_",j,".dtm ",
+                  listFiles[j], " ",mainDir, outDir, "caldern_normalized_point_cloud_LIDAR",j,".las "), 
+                  " ", paste(extend$MinX, extend$MinY, extend$MaxX, extend$MaxY)))
+    for (i in seq(length(heights)-1)){
+### create slice between zmin and zmax
+      system(paste0(paste0(Fusion, "clipdata.exe"," /zmin:",heights[i], "/zmax:",heights[i+1], " ", mainDir, outDir, "caldern_normalized_point_cloud_LIDAR",j,".las ",
+                    mainDir, outDir, "caldern_normalized_point_cloud_LIDAR_",heights[i],"_",heights[i+1],".las"),
+                    " ", paste(extend$MinX, extend$MinY, extend$MaxX, extend$MaxY))) 
+
+###create point count for 1m pixel raster in PLANE dtm
+      system(paste0(Fusion, "returndensity.exe ",mainDir,outDir, "point_count_all_point_cloud_LIDAR_",heights[i],"_",heights[i+1],"_",cellsize,".dtm ",
+                    cellsize, " ", mainDir, outDir, "caldern_normalized_point_cloud_LIDAR_",heights[i],"_",heights[i+1],".las"))
+    
+###convert to ascii 
+      system(paste0(Fusion, "dtm2ascii.exe ",mainDir,outDir, "point_count_all_point_cloud_LIDAR_",heights[i],"_",heights[i+1],"_",cellsize,".dtm ",
+                    mainDir,outDir, "point_count_all_point_cloud_LIDAR_",heights[i],"_",heights[i+1],"_",cellsize,".asc"))
+    }
+  }
+}
+
+#---------------------------------------------------------------------------#
+########### run function #######
+#---------------------------------------------------------------------------#
+
+classes(listFiles=las_files, mainDir=mainDir, inDir= inDir, heights = zValues, cellsize = 1)
+  
+```
+
+#---------------------------------------------------------------------------#
+####2. Raw script to calculate VDR index on 4 tiles (proceeding gi-ws-05-1)
+
+> description: the script contains the following steps:
+
+* set environment and read files
+    + list input files
+* preparations for CHM
+    + extract groundpoints of las data and create dtm
+    + normalize las cloud 
+* calculate Canopy Height Model
+* calculate HOME and save it as .asc file
+* merge 4 tiles in study area
+* calculate VDR index and save it as .asc file
+
+```{r, echo = T, eval = F}
+#---------------------------------------------------------------------------#
+############ set environment variables and read files ########### 
+#---------------------------------------------------------------------------#
+
+#libraries
+library("rgdal")
+library("raster")
+
+#directories
+mainDir <- "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing"
+##input folder
+inDir <- "/input/"
+## output folder
+outDir<- "/temp/vdr/"
+## Fusion binary folder
+Fusion<-"C:/FUSION/"
+
+#es dürfen nur die las dateien, die später gemerged werden, im input ordner sein
+smallLAS = dir(paste0(mainDir, inDir))
+
+#ordner erstellen wird später geloescht
+dir.create(paste0(mainDir, outDir))
+
+#ordner wird später gelöscht mit:
+del = FALSE
+
+#list all las files in input directory
+las_files<-list.files(paste0(mainDir,inDir), pattern=".las$", full.names=TRUE,recursive = TRUE)
+##write the whole file path and name into a .txt
+lapply(las_files, write, paste0(mainDir,inDir,"lidar_files.txt"), append=T)
+#infos über die .las
+system(paste0(Fusion, "catalog.exe ", mainDir, inDir, "lidar_files.txt " ,mainDir, outDir, "info_caldern.html"))
+
+#---------------------------------------------------------------------------#
+########### preparations for CHM ###########
+#---------------------------------------------------------------------------#
+
+### Create a .las with groundpoints only
+#.txt --> class_GroundPts.las
+system(paste0(Fusion, "clipdata.exe"," /class:2 ", mainDir, inDir, "lidar_files.txt ", 
+              mainDir, outDir, "classified_GroundPts.las ", "476000 5630000 479000 5633000"))
+
+### Create the required PLANS DTM format
+#class_GroundPts.las --> caldernGridSurf.dtm
+system(paste0(Fusion, "gridsurfacecreate.exe ", mainDir, outDir, "caldern_GridSurf.dtm ",
+              "1 M M 1 32 0 0 ", mainDir, outDir, "classified_GroundPts.las"))
+
+### normalize heights of las point cloud
+#CaldernGridSurf.dtm --> cald_NORMALIZED_poit_cloud.las
+system(paste0(Fusion, "clipdata.exe", " /height /dtm:", mainDir, outDir,"caldern_GridSurf.dtm ",
+              mainDir, inDir, "lidar_files.txt ", mainDir, outDir, "caldern_normalized_point_cloud_LIDAR.las ",
+              "476000 5630000 479000 5633000"))
+
+#---------------------------------------------------------------------------#
+########### calculate CHM ###########
+#---------------------------------------------------------------------------#
+
+##canopymodel canopy_surface.dtm 
+#normalized_point_cloud --> canopy surface, diese ist CH in der endformel
+system(paste0(Fusion, "canopymodel.exe"," /ascii ", mainDir, outDir, "canopy_surfaceX.ascii ", "1 M M 1 32 0 0 ",
+              mainDir, outDir, "caldern_normalized_point_cloud_LIDAR.las "))
+
+#dtm2tif_canopymodel, wandelt .dtm in .tif um
+##vllt werden hier werte gestreckt? -> besser nicht verwenden
+
+#system(paste0(Fusion, "DTM2TIF.exe ", mainDir, outDir, "canopy_surfaceX.dtm "))
+
+#---------------------------------------------------------------------------#
+########### calculate HOME ###########
+#---------------------------------------------------------------------------#
+
+#calculate 50th percentile of Lidar point cloud per 1mm pixel
+#output: .csv files are important!
+for(i in 1:4){
+  system(paste0(Fusion, "gridmetrics.exe ","/raster:p50 ", mainDir, outDir, 
+                "caldern_GridSurf.dtm ", "0 ", "1 ", mainDir, outDir,paste0("HOMEsmall",i,".dtm ") , mainDir, inDir, smallLAS[i] ))
+}
+
+#take 31 column of all_returns_elevation_stats.csv as this is the 50th percentile
+for(i in 1:4){
+  system(paste0(Fusion, "CSV2Grid.exe ", mainDir, outDir, paste0("HOMEsmall",i,"_all_returns_elevation_stats.csv "), "31 ",
+                mainDir, outDir, paste0("HOMEsmallbeforeMERGE",i,".asc ")))
+}
+
+#---------------------------------------------------------------------------#
+########### merge 4 tiles in study area ###########
+#---------------------------------------------------------------------------#
+
+#generate one .txt file for merging 4 tiles
+smallASCs = c()
+for(i in 1:4){
+  a = paste0(mainDir, outDir, "HOMEsmallbeforeMERGE",i,".asc ")
+  a -> smallASCs[i]
+}
+write(x = smallASCs, file = "temp/vdr/txtformerge.txt")
+
+#merge smalltifraster files 
+system(paste0(Fusion, "MergeRaster.exe ","/overlap:average ", mainDir, outDir, "HOMEp50.asc ",mainDir, outDir, "txtformerge.txt" ))
+
+#---------------------------------------------------------------------------#
+########### calculate VDR index and save it as .asc file ###########
+#---------------------------------------------------------------------------#
+
+#calculation of VDR index
+ch = raster(paste0(mainDir, outDir, "canopy_surfaceX.asc"))
+HOME = raster(paste0(mainDir, outDir, "HOMEp50.asc"))
+origin(HOME)[] <- origin(ch)
+VDR = (ch-HOME)/ch
+#delete negative values
+VDR@data@values[which(VDR@data@values >= 1)] <- NA
+VDR@data@values[which(VDR@data@values < 0)] <- NA
+
+#save output
+writeRaster(VDR, "VDR.asc")
+
+#delete textfile with listed lidar files of input folder
+file.remove("C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/input/lidar_files.txt")
+
+# if you run the whole skript again, delete the output directory, that you can create a new one in the next run
+if(del == T){
+  file.remove(paste0(mainDir, outDir,dir(paste0(mainDir, outDir))))
+}
+
+
+```
+
+#---------------------------------------------------------------------------#
+####3. Show result of VDR index
+
+```{r, echo = F, eval = T}
+#setwd("C:/Users/Laura/Documents/Uni/Geoinformationssysteme/ergebnisse")
+#install.packages("png", dependencies=TRUE)
+library("png")
+
+img <- readPNG("C:/Users/Laura/Documents/GitHub/msc-phygeo-class-of-2017-lgiese/gis/gi-ws-06-1/gi-ws-06-1.png")
+plot(1:600, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "Result: Vertical Distribution Ratio")
+
+lim <- par()
+rasterImage(img, 110, -10, 500, 610)
+
+```

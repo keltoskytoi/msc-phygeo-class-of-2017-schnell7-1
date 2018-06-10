@@ -1,0 +1,41 @@
+---
+title: "gi-ws-02-1"
+author: "Laura Giese, Johannes Schnell, Alena Schmid"
+date: "27 Februar 2018"
+output: html_document
+---
+
+# Deconstruction Work
+### description: first try to set up a workflow for deriving vertical forest structure by using LIDAR data 
+
+#### 1. table that describes what attributes of the LIDAR data we want to use for your classification (first try)
+```{r, echo = TRUE, eval = TRUE}
+Table=data.frame(c("Heterogenität", "Höhe des Kronendachs", "Dichte der Unterschicht", "Kronendeckung/-dichte", "Erhebung", "Terrain Ruggedness", "Hydrologie" ), 
+                 c("Punktdichte", "1.Response", "unterhalb 1.Response bis last Response", "1. Response und Punktdichte", "last Response", "last Response", "last response"), 
+                 c("1m","1m","1m","1m","1m", "1m", "1m"))
+colnames(Table)<-c("Structural Attribute", "Response", "Spatial Scale")                  
+print(Table)
+```
+
+#### 2. flowchart which illustrates our planned workflow for deriving vertical structural diversity from the LIDAR data
+```{r, echo=TRUE, eval = TRUE}
+#show flow chart of workflow
+#install.packages("png", dependencies=TRUE)
+library("png")
+
+setwd("C:/Users/Laura/Documents/Uni/Geoinformationssysteme")
+img <- readPNG("plan_s.png")
+plot(0:600, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "Flow Chart: Vertical Forest Structure")
+
+lim <- par()
+rasterImage(img, 180, -10, 420, 610)
+```
+
+#### 3. noticeable points dealing with the difficulties that could occure during the algorithm development:
+
+> Probleme:
+
+1. Boden wird nicht überall erreicht
+2. Last response nicht immer = Boden (auch Steine etc.)
+3. Lücken im Kronendach auch bei Sträuchern, nicht nur bei Boden
+4. Wenn Kronendach sehr dicht, keine Responses unterhalb des Kronendachs

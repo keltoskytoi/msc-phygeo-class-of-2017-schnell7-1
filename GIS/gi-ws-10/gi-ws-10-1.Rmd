@@ -9,7 +9,11 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Aufgabe:
+Einzelbaumerkung mit Hilfe verschiedneer Berechnungsmethoden (dalponte und watershed)
 
+Herangehensweise:
+mit der funktion lidR::lastrees lassen wir beide Methoden über ein normalisiertes Canopzheight modell laufen. und versuchen die auf dise weise ermittelte Baumanzahl mit einer vor Ort durchgeführten Messung zu vergleichen, als auch visuell ein zu schätzen ob der Algorythmus "ansprechende" Ergebnisse liefert oder Strukturen offenbart die "baumuntypisch" sind .
 
 ```{r, echo = TRUE, eval = FALSE}
 #### SKRIPT for Single Tree Detection with LidR - Sensitivity Analysis####
@@ -286,19 +290,30 @@ colnames(sa_files)<- c("filename", "method", "mintreeheight", "crowndiameter", "
 write.table(sa_files, file = paste0(output, "SensAnalysisFiles_out.txt"), sep =",")
 ```
 #----------------------------------------------------------------------#
+
+
+Nachfolgend die Resultate:
+Die Punkte in der dalponte-Darstellung stehen für den höchsten Punkt des "erkannten" Baumes. Diese Methode scheint offentsichtlich fehlerbehaftet, da viele Bäume in den Lücken noch sichtbar sind (sofern LAS und RGB aufnahmen korrekt übereinander liegen)
+
+In der Watershed-Darstellung lassen sich auch Lücken erkennen (dunklere Umrandung), diese decken sich aber eher mit dem visuellen Eindruck des RGB-Bildes. Manche Strukturen sehen tatsächlich recht baumig aus zB im rechten oberen Quandranten innerhalb der Lücke, andere scheinen eher mehrere Bäume zu einewm Objekt zusammengefasst zu haben.
+
+Die Dalpontemethode hat darüber hinaus ungefähr 3-4 mal soviele Bäume gezählt als die watershed-Methode. 
+
+Fazit:
+Die Einzelbaumerkennung innerhalb eines Waldes ist mit diesen methoden nur unzureichend und kann allenfalls als grober Schätzwert betrachtet werden. Für eine Baumerkennung in lichteren Gebieten scheint die watershed-Methode jedoch bessere Anhaltspunkte zu liefern
 #plot results:
 ```{r, echo = TRUE}
 library(png)
 setwd("C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing/Einzelbaum/input")
 
 img <- readPNG("dalponte_th10_und_cd5_darunter_th5_und_cd25.png")
-plot(1:1, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "watershed_th5graue_linien_darunter_th10schwarze_linien")
+plot(1:1, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "dalponte_th5graue_linien_darunter_th10schwarze_linien")
 
 lim <- par()
 rasterImage(img, lim$usr[1], lim$usr[3], lim$usr[2], lim$usr[4])
 
 img <- readPNG("watershed_th5graue_linien_darunter_th10schwarze_linien.png")
-plot(1:1, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "watershed_th5graue_linien_darunter_th10schwarze_linien")
+plot(1:1, type='n', xaxt="n", yaxt="n", xlab="", ylab = "", main = "watershed_th5graue_linien")
 
 lim <- par()
 rasterImage(img, lim$usr[1], lim$usr[3], lim$usr[2], lim$usr[4])

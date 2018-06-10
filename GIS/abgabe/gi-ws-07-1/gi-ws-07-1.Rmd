@@ -1,0 +1,477 @@
+---
+title: "gi-ws-07-1"
+author: "Laura Giese, Johannes Schnell, Alena Schmid"
+date: "9 Januar 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Raw script for deriving FHD-Index (Foliage Height Diversity) with Fusion
+details: see Fusion Manual for details
+
+> structure:
+
+1. Function which could be used to solve problem with missing extent
+2. deriving FHD-Index (Foliage Height Diversity) with Fusion with 2 Versions (percentiles and fixed height thresholds)
+3. deriving VDR-Index (Vertical Distribution Ratio) with Fusion and wrapper function
+
+#---------------------------------------------------------------------------#
+#### 1. Function which could be used to solve problem with missing extent
+
+```{r , eval = F}
+##function for missingExtents
+
+missingExtents<-function(catalogTable){
+  
+  for (i in 3:nrow(catalogTable)){
+    
+    findrows <- which(catalogTable$MinX ==0|catalogTable$MinY==0|
+                        catalogTable$MaxX==0|catalogTable$MaxY==0)
+    
+    for (j in findrows){
+      coor<-substr(catalogTable[j,1],nchar(as.character(catalogTable[j,1]))-10, nchar(as.character(catalogTable[j,1])))
+      
+      xmin<-paste0(substr(coor, 1,3), "000")
+      
+      ymin<-paste0(substr(coor, 4,7), "000")
+      
+      catalogTable[j,]$MinX=as.numeric(xmin)
+      
+      catalogTable[j,]$MinY=as.numeric(ymin)
+    }}
+  
+  
+  
+  return(catalogTable)
+  
+}
+```
+
+#---------------------------------------------------------------------------#
+####2. deriving FHD-Index (Foliage Height Diversity) with Fusion with 2 Versions (percentiles and fixed height thresholds)
+
+> description: the following script contains the following steps:
+
+* set environment and read files
+    + list input files
+* Version 1: calculate FHD (via height percentiles) with point density and merge 4 tiles of study area 
+    + preparations for creating height slices with point density
+        * extract groundpoints of las data and create dtm
+        * normalize las cloud 
+    + create height percentiles with point density and save as .asc files (vector: p_val)
+    + merge 4 tiles in study area and project them
+    + calculate fhd via height percentiles
+* Version 2: calculate FHD (via height thresholds) with point density and merge 4 tiles of study area 
+    + preparations for creating height slices with point density
+    + trying to create function for creating height classes (via height thresholds) and run function:
+        * list input files
+        * extract groundpoints of las data and create dtm
+        * normalize las cloud
+        * create slice between zmin and zmax (vector: heights)
+        * create point counts for slices (density) for raster and save as .asc files
+    + merge 4 tiles in study area and project them
+    + calculate fhd via height thresholds 
+
+```{r , eval = F}
+#---------------------------------------------------------------------------#
+############ set environment and read files ########### 
+#---------------------------------------------------------------------------#
+
+library("rgdal")
+#install.packages("rgdal", lib="C:/Program Files/R/R-3.3.3/library")
+library("raster")
+del = FALSE
+mainDir <- "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing"
+##input folder
+inDir <- "/input/"
+## output folder
+outDir<- "/temp/fhd/"
+## Fusion binary folder
+Fusion<-"C:/FUSION/"
+
+#create output directory
+dir.create(paste0(mainDir, outDir))
+
+#list las files in input folder
+las_files<-list.files(paste0(mainDir,inDir), pattern=".las$", full.names=TRUE,recursive = TRUE)
+##write the whole file path and name into a .txt
+lapply(las_files, write, paste0(mainDir,inDir,"lidar_files.txt"), append=T)
+
+#infos ueber die .las
+#system(paste0(Fusion, "catalog.exe ", mainDir, inDir, "lidar_files.txt " ,mainDir, outDir, "info_caldern.html"))
+
+#---------------------------------------------------------------------------#
+#####Version 1: calculate FHD (via height percentiles) with point density ###
+#####and merge 4 tiles of study area ###########
+#---------------------------------------------------------------------------#
+
+#---------------------------------------------------------------------------#
+###Version 1: preparations for creating height slices with point density ####
+#---------------------------------------------------------------------------#
+
+### Create a .las with groundpoints only
+#.txt --> class_GroundPts.las
+system(paste0(Fusion, "clipdata.exe"," /class:2 ", mainDir, inDir, "lidar_files.txt ", 
+              mainDir, outDir, "classified_GroundPts.las ", "476000 5630000 479000 5633000"))
+
+### Create the required PLANS DTM format
+#class_GroundPts.las --> caldernGridSurf.dtm
+system(paste0(Fusion, "gridsurfacecreate.exe ", mainDir, outDir, "caldern_GridSurf.dtm ",
+              "30 M M 1 32 0 0 ", mainDir, outDir, "classified_GroundPts.las"))
+
+### normalize heights of las point cloud
+#CaldernGridSurf.dtm --> cald_NORMALIZED_poit_cloud.las
+system(paste0(Fusion, "clipdata.exe", " /height /dtm:", mainDir, outDir,"caldern_GridSurf.dtm ",
+              mainDir, inDir, "lidar_files.txt ", mainDir, outDir, "caldern_normalized_point_cloud_LIDAR.las ",
+              "476000 5630000 479000 5633000"))
+
+#---------------------------------------------------------------------------#
+#####Version 1: create height percentiles with point density ################
+#---------------------------------------------------------------------------#
+
+#calculate percentiles of Lidar point cloud per 30mm pixel
+#output: .csv files are important!
+smallLAS = dir(paste0(mainDir, inDir))
+
+for(i in 1:4){
+  system(paste0(Fusion, "gridmetrics.exe ","/raster:p50 ", mainDir, outDir, 
+                "caldern_GridSurf.dtm ", "0 ", "30 ", mainDir, outDir,paste0("HOMEsmall",i,".dtm ") , mainDir, inDir, smallLAS[i] ))
+}
+
+#take 24:38 column of all_returns_elevation_stats.csv as these are the requested percentiles and save output raster files as .asc files
+p_val<-c(24:38) #select columns
+
+for(j in p_val){
+  for(i in 1:4){
+    system(paste0(Fusion, "CSV2Grid.exe ", mainDir, outDir, paste0("HOMEsmall",i,"_all_returns_elevation_stats.csv "), j," ",
+                  mainDir, outDir, paste0("HOMEsmallbeforeMERGE", i,"_p_", j,".asc ")))
+  }
+}
+
+#---------------------------------------------------------------------------#
+###########Version 1: merge 4 tiles in study area ###########
+#---------------------------------------------------------------------------#
+
+#generate one .txt file for merging 4 tiles
+smallTIFs = c()
+for (j in p_val){
+for(i in 1:4){
+  a = paste0(mainDir, outDir, "HOMEsmallbeforeMERGE",i,"_p_", j,".asc ")
+  a -> smallTIFs[i]
+}
+write(x = smallTIFs, file = paste0("temp/fhd/txtformerge_",j,".txt"))
+}
+
+#merge 4 tiles
+for (j in p_val){
+system(paste0(Fusion, "MergeRaster.exe ","/overlap:average ", mainDir, outDir, "fhd_p_", j, ".asc ", mainDir, outDir, "txtformerge_",j,".txt" ))
+}
+
+#list merged files
+list_fhd<-list.files(paste0(mainDir,outDir), pattern = glob2rx("fhd_p*.asc"), full.names=T)
+
+##write the whole file path and name of merged tiles into a .txt
+raster4calc<-lapply(list_fhd, function(x){
+              raster(x)
+              })
+
+#project merged tiles
+for (l in 1:length(raster4calc)){
+  projection(raster4calc[[l]]) <- CRS("+init=epsg:25832")
+  
+}
+
+#---------------------------------------------------------------------------#
+############Version 1: calculate fhd ########### 
+#---------------------------------------------------------------------------#
+
+raster_out<- ((-1) * (sum((raster4calc[[1]] * logb(raster4calc[[1]], base = exp(1))),
+                    (raster4calc[[2]] * logb(raster4calc[[2]], base = exp(1))),
+                    (raster4calc[[3]] * logb(raster4calc[[3]], base = exp(1))),
+                    (raster4calc[[4]] * logb(raster4calc[[4]], base = exp(1))),
+                    (raster4calc[[5]] * logb(raster4calc[[5]], base = exp(1))),
+                    (raster4calc[[6]] * logb(raster4calc[[6]], base = exp(1))),
+                    (raster4calc[[7]] * logb(raster4calc[[7]], base = exp(1))),
+                    (raster4calc[[8]] * logb(raster4calc[[8]], base = exp(1))),
+                    (raster4calc[[9]] * logb(raster4calc[[9]], base = exp(1))),
+                    (raster4calc[[10]] * logb(raster4calc[[10]], base = exp(1))),
+                    (raster4calc[[11]] * logb(raster4calc[[11]], base = exp(1))),
+                    (raster4calc[[12]] * logb(raster4calc[[12]], base = exp(1))),
+                    (raster4calc[[13]] * logb(raster4calc[[13]], base = exp(1))),
+                    (raster4calc[[14]] * logb(raster4calc[[14]], base = exp(1))),
+                    (raster4calc[[15]] * logb(raster4calc[[15]], base = exp(1)))
+                      )))
+
+hist(raster_out)
+range(raster_out@data)
+
+#---------------------------------------------------------------------------#
+####Version 2: calculate FHD (via height thresholds) with point density #####
+#####and merge 4 tiles of study area ###########
+#---------------------------------------------------------------------------#
+
+#---------------------------------------------------------------------------#
+###Version 2: preparations for creating height slices with point density ####
+#---------------------------------------------------------------------------#
+#create vector with height thresholdsfor deriving height classes and save output raster files as .asc files
+heights<-c(2,5,10,15,20,50)     # = heights in m
+
+cellsize <- 20 # set cellsize parameter for output raster grid
+
+#---------------------------------------------------------------------------#
+#Version 2: trying to create function for creating height classes 
+#(via height thresholds) with point densities on 4 tiles of study area
+#---------------------------------------------------------------------------#
+
+classes<-function(listFiles, mainDir, inDir, heights, cellsize){
+  for (j in seq(length(listFiles))){
+    ########### get some basic data########
+    ### basic informations
+    system(paste0(Fusion, "catalog.exe ", listFiles[j]," ", mainDir, outDir,
+                  "info_caldern_", j,".html"))
+    
+    extend<-read.csv(paste0(mainDir, outDir, "info_caldern_", j,".csv"), sep = ",", 
+                     header = T)
+    
+    #trying to deal with missing extent
+    #info<-read.csv(paste0(mainDir, outDir, "info_caldern_", j,".csv"), sep = ",", 
+    #header = T)
+    #info2<-missingExtents(info)
+    #extend<-paste(as.numeric(info2$MinX),as.numeric(info2$MinY),as.numeric(info2$MaxX),as.     numeric(info2$MaxY))
+
+    
+    ### Create a .las with groundpoints only
+    system(paste0(paste0(Fusion, "clipdata.exe"," /class:2 ", listFiles[j]," ", 
+                         mainDir, outDir, "classified_GroundPts_",j,".las "), 
+                  paste(extend$MinX, extend$MinY, extend$MaxX, extend$MaxY)))
+    
+    ### Create the required PLANS DTM format
+    system(paste0(Fusion, "gridsurfacecreate.exe ", mainDir, outDir,
+                  "caldern_GridSurf_",j,".dtm ", cellsize," M M 1 32 0 0 ",
+                  mainDir, outDir, "classified_GroundPts_",j,".las"))
+    
+    ### normalize heights of las point cloud
+    system(paste0(paste0(Fusion, "clipdata.exe", " /height /dtm:",mainDir, outDir,
+                          "caldern_GridSurf_",j,".dtm ",listFiles[j], " ",
+                          mainDir, outDir, "caldern_normalized_point_cloud_LIDAR",j,".las
+                          "), " ", 
+                  paste(extend$MinX, extend$MinY, extend$MaxX, extend$MaxY)))
+    for (i in seq(length(heights)-1)){
+      ### create slice between zmin and zmax (vector: heights)
+      system(paste0(paste0(Fusion, "clipdata.exe"," /zmin:",heights[i], "/zmax:",
+                           heights[i+1], " ", mainDir, outDir,
+                           "caldern_normalized_point_cloud_LIDAR",j,".las ",
+                           mainDir, outDir, "caldern_cloud_LIDAR_", j,"_", heights[i],
+                           "_",heights[i+1],".las"), " ",
+                    paste(extend$MinX, extend$MinY, extend$MaxX, extend$MaxY))) 
+      
+      ###create point counts for slices (density) for pixels of size "cellsize" raster
+      system(paste0(Fusion, "returndensity.exe ",mainDir,outDir, "caldern_cloud_LIDAR_",
+                    j,"_",heights[i],"_",heights[i+1],"_",cellsize,".dtm ",
+                    cellsize, " ", mainDir, outDir, "caldern_cloud_LIDAR_",
+                    j,"_",heights[i],"_",heights[i+1],".las"))
+      
+      ###convert to ascii 
+      system(paste0(Fusion, "dtm2ascii.exe ",
+                    mainDir,outDir, "caldern_cloud_LIDAR_", j,"_",
+                    heights[i],"_",heights[i+1],"_",cellsize,".dtm ",
+                    mainDir,outDir, "caldern_cloud_LIDAR_", j,"_",
+                    heights[i],"_",heights[i+1],"_",cellsize,".asc"))
+    }
+  }
+}
+
+#run function classes():
+density_slices<-classes(listFiles=las_files, mainDir=mainDir, inDir= inDir, heights = p_val, cellsize = cellsize)
+
+#---------------------------------------------------------------------------#
+###########Version 2: merge 4 tiles in study area ###########
+#---------------------------------------------------------------------------#
+
+#erstellen von txt for merge, einer textdatei fuer den merge
+smallTIFs = c()
+for (i in heights){
+for(j in 1:4){
+  a = paste0(mainDir, outDir, mainDir,outDir, "caldern_cloud_LIDAR_", j,"_",
+                    heights[i],"_", heights[i+1],"_",cellsize,".asc")
+  a -> smallTIFs[i]
+}
+write(x = smallTIFs, file = paste0("temp/fhd/txtformerge_", heights[i],"_",
+                                   heights[i+1],".txt"))
+}
+
+#merge
+
+#las_files<-list.files(paste0(mainDir,inDir), pattern=glob2rx("fhd_p"), full.names=TRUE,recursive = TRUE)
+##write the whole file path and name into a .txt
+#lapply(las_files, write, paste0(mainDir,inDir,"lidar_files.txt"), append=T)
+
+for (j in seq(lengths(heights)-1)){
+system(paste0(Fusion, "MergeRaster.exe ","/overlap:average ", mainDir, outDir,
+              "fhd_", heights[j],"_", heights[j+1], "_heights.asc ", mainDir, outDir,
+              "txtformerge_", heights[j],"_", heights[j+1],".txt" ))
+  }
+
+#list merged files
+list_fhd<-list.files(paste0(mainDir,outDir), pattern = glob2rx("_heights*.asc"),
+                     full.names=T)
+##write the whole file path and name into a .txt
+raster4calc<-lapply(list_fhd, function(x){
+              raster(x)
+              })
+
+#project
+for (l in 1:length(raster4calc)){
+  projection(raster4calc[[l]]) <- CRS("+init=epsg:25832")
+  
+}
+
+#---------------------------------------------------------------------------#
+############Version 2: calculate fhd ########### 
+#---------------------------------------------------------------------------#
+
+#for (i in seq(length(raster4calc))){
+raster_out<- ((-1) * (sum((raster4calc[[1]] * logb(raster4calc[[1]], base = exp(1))),
+                    (raster4calc[[2]] * logb(raster4calc[[2]], base = exp(1))),
+                    (raster4calc[[3]] * logb(raster4calc[[3]], base = exp(1))),
+                    (raster4calc[[4]] * logb(raster4calc[[4]], base = exp(1))),
+                    (raster4calc[[5]] * logb(raster4calc[[5]], base = exp(1)))
+                     )))
+#}
+hist(raster_out)
+range(raster_out@data)
+```
+
+#---------------------------------------------------------------------------#
+####Developping function for calculating VDR-Index (Vertical Distribution Ratio) with Fusion (proceeding gi-ws-06-1)
+
+> description: the following function contains the following steps:
+
+* list input files
+* preparations for CHM
+    + extract groundpoints of las data and create dtm
+    + normalize las cloud 
+* calculate Canopy Height Model
+* calculate HOME and save it as .asc file
+* merge 4 tiles in study area
+* calculate VDR index and save it as .asc file
+
+```{r , eval = F}
+
+vdrIndex = function(Fusion,
+                    mainDir,
+                    inDir,
+                    outDir,
+                    extent = "476000 5630000 479000 5633000",
+                    cellsize = 1,
+                    parameter = 31,
+                    del = F) {
+  library("rgdal")
+  library("raster")
+  
+  #es dürfen nur die las dateien, die später gemerged werden, im input ordner sein
+  smallLAS = dir(paste0(mainDir, inDir))
+  
+  #ordner erstellen wird später geloescht
+  dir.create(paste0(mainDir, outDir))
+  
+  #list all las files in input directory
+  las_files <-list.files(paste0(mainDir, inDir), pattern = ".las$", full.names = TRUE,
+                         recursive = TRUE)
+  ##write the whole file path and name into a .txt
+  lapply(las_files, write, paste0(mainDir, inDir, "lidar_files.txt"), append = T)
+  
+  #infos ueber die .las
+  system(paste0(Fusion, "catalog.exe ", mainDir, inDir, "lidar_files.txt " ,
+                mainDir,outDir,"info_caldern.html"))
+  
+  ### Create a .las with groundpoints only
+  #.txt --> class_GroundPts.las
+  system(paste0(Fusion,"clipdata.exe"," /class:2 ",mainDir,inDir,"lidar_files.txt
+                ",mainDir,outDir,"classified_GroundPts.las ", extent))
+  
+  ### Create the required PLANS DTM format
+  #class_GroundPts.las --> caldernGridSurf.dtm
+  system(paste0(Fusion, "gridsurfacecreate.exe ", mainDir, outDir, "caldern_GridSurf.dtm ",
+                cellsize, " M M 1 32 0 0 ", mainDir, outDir, "classified_GroundPts.las"))
+  
+  ### normalize heights of las point cloud
+  #CaldernGridSurf.dtm --> cald_NORMALIZED_poit_cloud.las
+  system(paste0(Fusion,"clipdata.exe", " /height /dtm: ", mainDir,
+                outDir,"caldern_GridSurf.dtm ", mainDir, inDir, "lidar_files.txt ",
+                mainDir, outDir, "caldern_normalized_point_cloud_LIDAR.las ", extent))
+  
+  
+  ##canopymodel canopy_surface.dtm
+  #normalized_point_cloud --> canopy surface, diese ist CH in der endformel
+  system(paste0(Fusion, "canopymodel.exe", " /ascii ", mainDir, outDir,
+                "canopy_surfaceX.ascii ", paste0(cellsize, " M M 1 32 0 0 "), mainDir,
+                outDir, "caldern_normalized_point_cloud_LIDAR.las "))
+  
+  #dtm2tif_canopymodel
+  ##vllt wird hier gestreckt
+  #wandelt .dtm in .tif um
+  #system(paste0(Fusion, "DTM2TIF.exe ", mainDir, outDir, "canopy_surfaceX.dtm "))
+  
+  
+  ####erstellung von HOMEp50
+  
+  #wichtig hierbei die csv dateien!
+  for (i in 1:4) {
+    system(paste0(Fusion, "gridmetrics.exe ", "/raster:p50 ", mainDir, outDir,
+                  "caldern_GridSurf.dtm ", "0 ", "1 ", mainDir, outDir, paste0("HOMEsmall",
+                                                                               i, ".dtm ")
+                  , mainDir, inDir, smallLAS[i]))
+  }
+  
+  #nur mit der csv wird weitergemacht
+  for (i in 1:4) {
+    system(paste0(Fusion, "CSV2Grid.exe ", mainDir, outDir, 
+                  paste0("HOMEsmall", i, "_all_returns_elevation_stats.csv "), 
+                  parameter, " ", mainDir, outDir, 
+                  paste0("HOMEsmallbeforeMERGE", i, ".asc ")))
+  }
+  
+  #erstellen von txt for merge, einer textdatei fuer den merge
+  smallASCs = c()
+  for (i in 1:4) {
+    a = paste0(mainDir, outDir, "HOMEsmallbeforeMERGE", i, ".asc ")
+    a -> smallASCs[i]
+  }
+  write(x = smallASCs, file = "temp/vdr/txtformerge.txt")
+  
+  #merged die smalltifraster zu
+  system(paste0(Fusion, "MergeRaster.exe ", "/overlap:average ", mainDir, outDir,
+                "HOMEp50.asc ", mainDir, outDir, "txtformerge.txt"))
+  
+  #die eigentliche Rechnung
+  ch = raster(paste0(mainDir, outDir, "canopy_surfaceX.asc"))
+  HOME = raster(paste0(mainDir, outDir, "HOMEp50.asc"))
+  origin(HOME)[] <- origin(ch)
+  VDR = (ch - HOME) / ch
+  VDR@data@values[which(VDR@data@values >= 1)] <- NA
+  VDR@data@values[which(VDR@data@values < 0)] <- NA
+  
+  writeRaster(VDR, "VDR.asc")
+  
+  file.remove(paste0(mainDir, inDir, "lidar_files.txt"))
+  
+  if (del == T) {
+    file.remove(paste0(mainDir, outDir, dir(paste0(mainDir, outDir))))
+  }
+  
+}
+
+
+vdrIndex(Fusion = "C:/FUSION/",
+         mainDir = "C:/Users/Laura/Documents/Uni/Rmsc/Data/GIS/POINTCLOUD_processing",
+         inDir = "/input/",
+         outDir = "/temp/vdr/",
+         extent = "476000 5630000 479000 5633000",
+         cellsize = 1,
+         parameter = 31,
+         del = F)
+```
